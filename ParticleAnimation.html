@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #000; overflow-x: hidden; }
+    #scroll-container {
+      height: 400vh;
+    }
+    canvas {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <div id="scroll-container"></div>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      initTargets();
+    });
+
+    const PARTICLE_COUNT = 120;
+    const CIRCLE_COUNT = 3;
+
+    // Particle colors
+    const COLORS = ['#ffffff', '#a0c4ff', '#bdb2ff', '#ffc6ff', '#caffbf'];
+
+    class Particle {
+      constructor(i) {
+        this.index = i;
+        this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+        this.baseSize = Math.random() * 3 + 1.5;
+
+        // Random float position
+        this.floatX = Math.random() * canvas.width;
+        this.floatY = Math.random() * canvas.height;
+
+        // Random drift velocity
+        this.vx = (Math.random() - 0.5) * 0.6;
+        this.vy = (Math.random() - 0.5) * 0.6;
+
+        // Current render position (starts at float position)
+        this.x = this.floatX;
+        this.y = this.floatY;
+
+        // Target circle position (set by initTargets)
+        this.targetX = this.floatX;
+        this.targetY = this.floatY;
+
+        // Orbit angle for rotation
+        this.orbitAngle = Math.random() * Math.PI * 2;
+        this.orbitSpeed = 0;
+        this.orbitRadius = 0;
+        this.orbitCX = 0;
+        this.orbitCY = 0;
+      }
+    }
+
+    const particles = Array.from({ length: PARTICLE_COUNT }, (_, i) => new Particle(i));
+
+    // Define orbit rings
+    let orbits = [];
+
+    function initTargets() {
+      const cx = canvas.width / 2;
+      const cy = canvas.height / 2;
+
+      // Three concentric circles with different radii
+      const radii = [80, 160, 250];
+      const speeds = [0.012, 0.008, 0.005]; // clockwise (positive)
+
+      orbits = radii.map((r, ri) => ({
+        cx, cy,
+        radius: r,
+        speed: speeds[ri],
+      }));
+
+      // Distribute particles evenly among orbits
+      particles.forEach((p, i) => {
+        const orbitIndex = i % CIRCLE_COUNT;
+        const orbit = orbits[orbitIndex];
+        const countInOrbit = Math.ceil(PARTICLE_COUNT / CIRCLE_COUNT);
+        const slotInOrbit = Math.floor(i / CIRCLE_COUNT);
+        const startAngle = (slotInOrbit / countInOrbit) * Math.PI * 2;
+
+        p.orbitAngle = startAngle;
+        p.orbitRadius = orbit.radius;
+        p.orbitSpeed = orbit.speed;
+        p.orbitCX = orbit.cx;
+        p.orbitCY = orbit.cy;
+        p.targetX = orbit.cx + Math.cos(startAngle) * orbit.radius;
+        p.targetY = orbit.cy + Math.sin(startAngle) * orbit.radius;
+      });
+    }
+
+    initTargets();
+
+    let scrollProgress = 0; // 0 = floating, 1 = orbiting
+
+    window.addEventListener('scroll', () => {
+      const maxScroll = document.body.scrollHeight - window.innerHeight;
+      // Use first 60% of scroll range for the transition
+      scrollProgress = Math.min(1, window.scrollY / (maxScroll * 0.6));
+    });
+
+    function easeInOut(t) {
+      return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+    }
+
+    let lastTime = 0;
+
+    function animate(time) {
+      const dt = Math.min((time - lastTime) / 16.67, 3); // normalize to 60fps
+      lastTime = time;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const progress = easeInOut(scrollProgress);
+
+      particles.forEach(p => {
+        // Update float position
+        if (progress < 1) {
+          p.floatX += p.vx * dt;
+          p.floatY += p.vy * dt;
+
+          // Bounce off edges
+          if (p.floatX < 0 || p.floatX > canvas.width) p.vx *= -1;
+          if (p.floatY < 0 || p.floatY > canvas.height) p.vy *= -1;
+          p.floatX = Math.max(0, Math.min(canvas.width, p.floatX));
+          p.floatY = Math.max(0, Math.min(canvas.height, p.floatY));
+        }
+
+        // Advance orbit angle (clockwise)
+        p.orbitAngle += p.orbitSpeed * dt;
+        const orbitX = p.orbitCX + Math.cos(p.orbitAngle) * p.orbitRadius;
+        const orbitY = p.orbitCY + Math.sin(p.orbitAngle) * p.orbitRadius;
+
+        // Interpolate between float and orbit
+        p.x = p.floatX + (orbitX - p.floatX) * progress;
+        p.y = p.floatY + (orbitY - p.floatY) * progress;
+
+        // Size: slightly larger when in orbit
+        const size = p.baseSize + progress * 0.8;
+
+        // Glow effect when orbiting
+        const glowAlpha = 0.15 + progress * 0.25;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, size * (2 + progress * 2), 0, Math.PI * 2);
+        ctx.fillStyle = p.color.replace(')', `, ${glowAlpha})`).replace('rgb', 'rgba').replace('#', 'rgba(').replace('rgba(', 'rgba(');
+        // Simple glow using shadow
+        ctx.shadowBlur = progress * 12;
+        ctx.shadowColor = p.color;
+        ctx.fillStyle = p.color;
+        ctx.globalAlpha = 0.4 + progress * 0.6;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.globalAlpha = 1;
+      });
+
+      requestAnimationFrame(animate);
+    }
+
+    requestAnimationFrame(animate);
+  </script>
+</body>
+</html>

@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Constellation</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d0d14; overflow-x: hidden; }
+    #scroll-container { height: 500vh; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="scroll-container"></div>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+    let W, H, CX, CY;
+
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+    }
+    setSize();
+
+    // ── Logo geometry ──────────────────────────────────────────────────────
+    const LOGO_ASPECT = 1176 / 991;
+    const LOGO_DEFS = [
+      { pts: [[0.18598,0.50023],[0.45767,0.50023],[0.27169,1.0],[0.0,1.0]],       aS:0.00, aE:0.55 },
+      { pts: [[0.64313,1.0],[0.91458,1.0],[0.72878,0.50023],[0.45731,0.50023]],   aS:0.15, aE:0.70 },
+      { pts: [[0.72859,0.49977],[1.0,0.49977],[0.81429,0.0],[0.54260,0.0]],       aS:0.30, aE:0.85 },
+    ];
+
+    function getLayout() {
+      const maxW = Math.min(W * 0.34, 360), maxH = Math.min(H * 0.42, 310);
+      let lw = maxW, lh = maxW / LOGO_ASPECT;
+      if (lh > maxH) { lh = maxH; lw = lh * LOGO_ASPECT; }
+      // Shift logo up slightly to make vertical room for the tagline below
+      return { lw, lh, ox: CX - lw / 2, oy: CY - lh / 2 - 18 };
+    }
+
+    // ── Particle ───────────────────────────────────────────────────────────
+    class Particle {
+      constructor(isLogo = false, defIdx = -1, ptIdx = -1) {
+        this.isLogo = isLogo; this.defIdx = defIdx; this.ptIdx = ptIdx;
+        this.x  = Math.random() * W;
+        this.y  = Math.random() * H;
+        this.vx = (Math.random() - 0.5) * 0.7;
+        this.vy = (Math.random() - 0.5) * 0.7;
+        this.rx = this.x; this.ry = this.y;
+        this.t = 0; this.rawT = 0;
+      }
+      update(dt) {
+        this.x += this.vx * dt;
+        this.y += this.vy * dt;
+        if (this.x < 0)  this.vx =  Math.abs(this.vx);
+        if (this.x > W)  this.vx = -Math.abs(this.vx);
+        if (this.y < 0)  this.vy =  Math.abs(this.vy);
+        if (this.y > H)  this.vy = -Math.abs(this.vy);
+      }
+    }
+
+    let regular = [], logos = [];
+    function build() {
+      regular = Array.from({ length: 80 }, () => new Particle());
+      logos   = [];
+      LOGO_DEFS.forEach((def, di) =>
+        def.pts.forEach((_, pi) => logos.push(new Particle(true, di, pi)))
+      );
+    }
+    build();
+
+    // ── Scroll ─────────────────────────────────────────────────────────────
+    let scrollProg = 0;
+    window.addEventListener('scroll', () => {
+      const max = document.body.scrollHeight - window.innerHeight;
+      scrollProg = Math.min(1, window.scrollY / (max * 0.85));
+    });
+
+    const ease     = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+    const clamp    = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
+    const lerp     = (a,b,t)   => a + (b-a) * t;
+    const easeOut3 = t => 1 - Math.pow(1-t, 3);
+
+    // ── Render loop ────────────────────────────────────────────────────────
+    let lastTime = 0;
+    function render(ts) {
+      const dt = Math.min((ts - lastTime) / 16.67, 3);
+      lastTime  = ts;
+
+      const prog = ease(scrollProg);
+      const { lw, lh, ox, oy } = getLayout();
+      // Responsive max-link distance: ~17% of shorter screen dimension
+      const ML  = Math.min(W, H) * 0.17;
+      const ML2 = ML * ML;
+
+      ctx.fillStyle = '#0d0d14';
+      ctx.fillRect(0, 0, W, H);
+
+      // Update float positions
+      regular.forEach(p => p.update(dt));
+      logos.forEach(p   => p.update(dt));
+
+      // Compute logo render positions (lerp float → final canvas position)
+      logos.forEach(p => {
+        const def  = LOGO_DEFS[p.defIdx];
+        p.rawT     = clamp((prog - def.aS) / (def.aE - def.aS), 0, 1);
+        p.t        = easeOut3(p.rawT);
+        const [fx, fy] = def.pts[p.ptIdx];
+        p.rx = lerp(p.x, ox + fx * lw, p.t);
+        p.ry = lerp(p.y, oy + fy * lh, p.t);
+      });
+
+      // Flat array: regular particles at float pos, logo at render pos
+      const pts = [
+        ...regular.map(p => ({ x: p.x,  y: p.y,  isLogo: false, t: 0 })),
+        ...logos.map(p   => ({ x: p.rx, y: p.ry, isLogo: true,  t: p.t })),
+      ];
+      const n = pts.length;
+
+      // Build neighbour graph
+      const nbrs    = Array.from({ length: n }, () => []);
+      const nbrSets = Array.from({ length: n }, () => new Set());
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const dx = pts[i].x - pts[j].x, dy = pts[i].y - pts[j].y;
+          if (dx*dx + dy*dy < ML2) {
+            nbrs[i].push(j); nbrs[j].push(i);
+            nbrSets[i].add(j); nbrSets[j].add(i);
+          }
+        }
+      }
+
+      // ── 1. Triangle fills ─────────────────────────────────────────────
+      for (let i = 0; i < n; i++) {
+        for (const j of nbrs[i]) {
+          if (j <= i) continue;
+          for (const k of nbrs[j]) {
+            if (k <= j || !nbrSets[i].has(k)) continue;
+            const pi = pts[i], pj = pts[j], pk = pts[k];
+            const isLogoTri = pi.isLogo && pj.isLogo && pk.isLogo;
+            ctx.beginPath();
+            ctx.moveTo(pi.x, pi.y);
+            ctx.lineTo(pj.x, pj.y);
+            ctx.lineTo(pk.x, pk.y);
+            ctx.closePath();
+            ctx.fillStyle = isLogoTri
+              ? `rgba(124,58,237,${Math.max(pi.t, pj.t, pk.t) * 0.14})`
+              : 'rgba(130,150,220,0.03)';
+            ctx.fill();
+          }
+        }
+      }
+
+      // ── 2. Lines ──────────────────────────────────────────────────────
+      for (let i = 0; i < n; i++) {
+        for (const j of nbrs[i]) {
+          if (j <= i) continue;
+          const a = pts[i], b = pts[j];
+          const dx = a.x - b.x, dy = a.y - b.y;
+          const fo   = 1 - Math.sqrt(dx*dx + dy*dy) / ML;
+          const both = a.isLogo && b.isLogo;
+          const alpha = both
+            ? fo * (0.12 + Math.max(a.t, b.t) * 0.72)
+            : fo * 0.11;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y);
+          ctx.strokeStyle = both
+            ? `rgba(155,90,255,${alpha})`
+            : `rgba(150,165,220,${alpha})`;
+          ctx.lineWidth   = both ? 1.2 : 0.6;
+          ctx.stroke();
+        }
+      }
+
+      // ── 3. Logo polygon fills & edges ─────────────────────────────────
+      LOGO_DEFS.forEach((_, di) => {
+        const lps     = logos.filter(p => p.defIdx === di).sort((a,b) => a.ptIdx - b.ptIdx);
+        const minRawT = Math.min(...lps.map(p => p.rawT));
+        const avgT    = lps.reduce((s,p) => s + p.t, 0) / lps.length;
+
+        // Purple fill arrives near the end of each piece's window
+        const fillT = ease(clamp((minRawT - 0.60) / 0.40, 0, 1));
+        if (fillT > 0) {
+          ctx.beginPath();
+          ctx.moveTo(lps[0].rx, lps[0].ry);
+          for (let i = 1; i < lps.length; i++) ctx.lineTo(lps[i].rx, lps[i].ry);
+          ctx.closePath();
+          ctx.fillStyle = `rgba(124,58,237,${fillT * 0.92})`;
+          ctx.fill();
+        }
+
+        // Outline grows in as the piece assembles
+        if (avgT > 0.05) {
+          ctx.beginPath();
+          ctx.moveTo(lps[0].rx, lps[0].ry);
+          for (let i = 1; i < lps.length; i++) ctx.lineTo(lps[i].rx, lps[i].ry);
+          ctx.closePath();
+          ctx.strokeStyle = `rgba(175,115,255,${avgT * 0.95})`;
+          ctx.lineWidth   = 1.8;
+          ctx.stroke();
+        }
+      });
+
+      // ── 4. Dots ───────────────────────────────────────────────────────
+      pts.forEach(p => {
+        const r = p.isLogo ? (1.8 + p.t * 1.5) : 1.8;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fillStyle = (p.isLogo && p.t > 0.5)
+          ? `rgba(185,130,255,${0.55 + p.t * 0.45})`
+          : 'rgba(190,205,245,0.72)';
+        ctx.fill();
+      });
+
+      // ── 5. Tagline ────────────────────────────────────────────────────────
+      const tagAlpha = ease(clamp((prog - 0.82) / 0.18, 0, 1));
+      if (tagAlpha > 0) {
+        const TAG_TEXT = 'Bringing Clarity to Complexity';
+        // Measure at base size, scale so text spans 2× logo width
+        ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+        const tagSize = Math.round(100 * (lw * 2) / ctx.measureText(TAG_TEXT).width);
+        ctx.save();
+        ctx.globalAlpha  = tagAlpha;
+        ctx.font         = `300 ${tagSize}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+        ctx.fillStyle    = 'rgba(210,200,240,1)';
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(TAG_TEXT, CX, oy + lh + 24);
+        ctx.restore();
+      }
+
+      ctx.globalAlpha = 1;
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+    window.addEventListener('resize', () => { setSize(); build(); scrollProg = 0; });
+  </script>
+</body>
+</html>

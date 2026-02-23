@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logo Assembly</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #fff; overflow-x: hidden; }
+    #scroll-container { height: 500vh; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="scroll-container"></div>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+
+    let W, H, CX, CY;
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+    }
+    setSize();
+
+    // ── Logo geometry ─────────────────────────────────────────────────────────
+    const LOGO_ASPECT = 1176 / 991;
+
+    function getLogoSize() {
+      const maxW = Math.min(W * 0.32, 340);
+      const maxH = Math.min(H * 0.38, 280);
+      let lw = maxW, lh = maxW / LOGO_ASPECT;
+      if (lh > maxH) { lh = maxH; lw = lh * LOGO_ASPECT; }
+      return { lw, lh };
+    }
+
+    // Logo piece definitions + their arrival timing
+    const LOGO_DEFS = [
+      { pts: [[0.18598,0.50023],[0.45767,0.50023],[0.27169,1.0],[0.0,1.0]],         aS:0.00, aE:0.52 },
+      { pts: [[0.64313,1.0],[0.91458,1.0],[0.72878,0.50023],[0.45731,0.50023]],     aS:0.12, aE:0.64 },
+      { pts: [[0.72859,0.49977],[1.0,0.49977],[0.81429,0.0],[0.54260,0.0]],         aS:0.26, aE:0.78 },
+    ];
+
+    function centroid(pts) {
+      return {
+        cx: pts.reduce((s,p) => s + p[0], 0) / pts.length,
+        cy: pts.reduce((s,p) => s + p[1], 0) / pts.length,
+      };
+    }
+
+    // Piece points centred at origin, scaled to canvas size
+    function centredPts(def, lw, lh) {
+      const { cx, cy } = centroid(def.pts);
+      return def.pts.map(p => [(p[0] - cx) * lw, (p[1] - cy) * lh]);
+    }
+
+    // ── Random polygon generator ──────────────────────────────────────────────
+    function makePoly() {
+      const sides = Math.random() < 0.45 ? 3 : 4;
+      const size  = Math.random() * 70 + 20;
+      const pts   = [];
+      for (let i = 0; i < sides; i++) {
+        const a = (i / sides) * Math.PI * 2 + (Math.random() - 0.5) * 0.9;
+        const r = size * (0.5 + Math.random() * 0.7);
+        pts.push([Math.cos(a) * r, Math.sin(a) * r]);
+      }
+      return { pts, alpha: 0.25 + Math.random() * 0.55 };
+    }
+
+    // ── Particle class (shared by random noise and logo pieces) ───────────────
+    class Poly {
+      constructor(isLogo = false, defIdx = -1) {
+        this.isLogo  = isLogo;
+        this.defIdx  = defIdx;
+        this.x       = Math.random() * W;
+        this.y       = Math.random() * H;
+        this.vx      = (Math.random() - 0.5) * 2.0;
+        this.vy      = (Math.random() - 0.5) * 2.0;
+        this.angle   = Math.random() * Math.PI * 2;
+        this.angVel  = (Math.random() - 0.5) * 0.045;
+        if (!isLogo) {
+          const d    = makePoly();
+          this.pts   = d.pts;
+          this.alpha = d.alpha;
+        }
+      }
+
+      update(dt, driftMul = 1) {
+        this.x     += this.vx * dt * driftMul;
+        this.y     += this.vy * dt * driftMul;
+        this.angle += this.angVel * dt * driftMul;
+        // Bounce
+        if (this.x < -160) this.vx =  Math.abs(this.vx);
+        if (this.x > W+160) this.vx = -Math.abs(this.vx);
+        if (this.y < -160) this.vy =  Math.abs(this.vy);
+        if (this.y > H+160) this.vy = -Math.abs(this.vy);
+      }
+    }
+
+    let noise = [], pieces = [];
+
+    function build() {
+      noise  = Array.from({ length: 55 }, () => new Poly(false));
+      pieces = LOGO_DEFS.map((_, i) => new Poly(true, i));
+    }
+    build();
+
+    // ── Scroll ────────────────────────────────────────────────────────────────
+    let scrollProg = 0;
+    window.addEventListener('scroll', () => {
+      const max = document.body.scrollHeight - window.innerHeight;
+      scrollProg = Math.min(1, window.scrollY / (max * 0.85));
+    });
+
+    const ease      = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+    const clamp     = (v,lo,hi) => Math.max(lo, Math.min(hi, v));
+    const lerp      = (a,b,t)   => a + (b-a)*t;
+
+    function easeOutBack(t) {
+      const c1 = 1.5, c3 = c1 + 1;
+      return 1 + c3 * Math.pow(t-1,3) + c1 * Math.pow(t-1,2);
+    }
+
+    // ── Render ────────────────────────────────────────────────────────────────
+    let lastTime = 0;
+
+    function render(ts) {
+      const dt   = Math.min((ts - lastTime) / 16.67, 3);
+      lastTime   = ts;
+
+      const prog       = ease(scrollProg);
+      const { lw, lh } = getLogoSize();
+      const ox         = CX - lw / 2;
+      const oy         = CY - lh / 2;
+
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, W, H);
+
+      // Logo pieces slow down and stop as scroll increases
+      const driftMul = Math.max(0, 1 - prog * 2);
+
+      // Update
+      noise.forEach(p  => p.update(dt));
+      pieces.forEach(p => p.update(dt, driftMul));
+
+      // ── 1. Draw noise polygons (outline) ─────────────────────────────────
+      noise.forEach(p => {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.angle);
+        ctx.beginPath();
+        ctx.moveTo(p.pts[0][0], p.pts[0][1]);
+        for (let i = 1; i < p.pts.length; i++) ctx.lineTo(p.pts[i][0], p.pts[i][1]);
+        ctx.closePath();
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth   = 1.2;
+        ctx.globalAlpha = p.alpha;
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      // ── 2. Draw logo pieces ───────────────────────────────────────────────
+      pieces.forEach((p, i) => {
+        const def = LOGO_DEFS[i];
+        const { cx: ncx, cy: ncy } = centroid(def.pts);
+
+        // Final centroid in canvas coords
+        const fx = ox + ncx * lw;
+        const fy = oy + ncy * lh;
+
+        // Per-piece arrival progress
+        const rawT   = clamp((prog - def.aS) / (def.aE - def.aS), 0, 1);
+        const t      = easeOutBack(rawT);
+
+        // Render position and angle
+        const rx = lerp(p.x, fx, t);
+        const ry = lerp(p.y, fy, t);
+        const ra = lerp(p.angle, 0, t);
+
+        // Colour: dark outline → purple fill (starts near end of arrival)
+        const colorT = ease(clamp((rawT - 0.78) / 0.22, 0, 1));
+        const col    = `rgb(124,58,237)`;
+
+        const cpts = centredPts(def, lw, lh);
+
+        ctx.save();
+        ctx.translate(rx, ry);
+        ctx.rotate(ra);
+        ctx.beginPath();
+        ctx.moveTo(cpts[0][0], cpts[0][1]);
+        for (let j = 1; j < cpts.length; j++) ctx.lineTo(cpts[j][0], cpts[j][1]);
+        ctx.closePath();
+
+        // Outline (fades to transparent as fill arrives)
+        ctx.globalAlpha = 1 - colorT * 0.9;
+        ctx.strokeStyle = '#111';
+        ctx.lineWidth   = 1.5;
+        ctx.stroke();
+
+        // Fill (fades in)
+        if (colorT > 0) {
+          ctx.globalAlpha = colorT;
+          ctx.fillStyle   = col;
+          ctx.fill();
+        }
+
+        ctx.restore();
+      });
+
+      ctx.globalAlpha = 1;
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+    window.addEventListener('resize', () => { setSize(); build(); scrollProg = 0; });
+  </script>
+</body>
+</html>

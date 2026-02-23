@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Clarity</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f0f0f0; overflow-x: hidden; }
+    #scroll-container { height: 350vh; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="scroll-container"></div>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+
+    let W, H, CX, CY, textWidth;
+
+    const COUNT      = 260;
+    const COLORS     = ['#7c3aed', '#8b5cf6', '#a78bfa', '#6d28d9', '#9333ea', '#c4b5fd'];
+    const ORBIT_SPD  = 0.003;
+    const TEXT       = 'bringing clarity to complexity';
+
+    function fontSize()  { return Math.min(44, W / 22); }
+    function circleR()   { return textWidth / 2 + 50; }
+
+    function measureTextWidth() {
+      ctx.font = `300 ${fontSize()}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+      textWidth = ctx.measureText(TEXT).width;
+    }
+
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+      measureTextWidth();
+    }
+    setSize();
+
+    // ── Particle ──────────────────────────────────────────────────────────────
+    class Particle {
+      constructor(idx) {
+        this.color = COLORS[Math.floor(Math.random() * COLORS.length)];
+        this.r     = Math.random() * 2.5 + 1.2;
+        this.fx    = Math.random() * W;
+        this.fy    = Math.random() * H;
+        this.vx    = (Math.random() - 0.5) * 0.55;
+        this.vy    = (Math.random() - 0.5) * 0.55;
+        this.frozenX = this.fx;
+        this.frozenY = this.fy;
+        this.angle   = (idx / COUNT) * Math.PI * 2;
+        this.x = this.fx;
+        this.y = this.fy;
+      }
+      orbitPos() {
+        const R = circleR();
+        return { x: CX + Math.cos(this.angle) * R,
+                 y: CY + Math.sin(this.angle) * R };
+      }
+    }
+
+    let particles = [];
+    function buildParticles() {
+      particles = Array.from({ length: COUNT }, (_, i) => new Particle(i));
+    }
+    buildParticles();
+
+    // ── Scroll ────────────────────────────────────────────────────────────────
+    let scrollProg = 0;
+    let frozen     = false;
+
+    window.addEventListener('scroll', () => {
+      const maxScroll = document.body.scrollHeight - window.innerHeight;
+      scrollProg = Math.min(1, window.scrollY / (maxScroll * 0.65));
+
+      if (!frozen && window.scrollY > 0) {
+        frozen = true;
+        particles.forEach(p => { p.frozenX = p.fx; p.frozenY = p.fy; });
+      }
+    });
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function ease(t) { return t < 0.5 ? 2*t*t : -1 + (4 - 2*t)*t; }
+    function lerp(a, b, t) { return a + (b - a) * t; }
+
+    // ── Main loop ─────────────────────────────────────────────────────────────
+    let lastTime = 0;
+
+    function animate(ts) {
+      const dt   = Math.min((ts - lastTime) / 16.67, 3);
+      lastTime   = ts;
+
+      ctx.fillStyle = '#f0f0f0';
+      ctx.fillRect(0, 0, W, H);
+
+      const prog = ease(scrollProg);
+
+      // Text: marquees from right edge to horizontal center, in sync with circle
+      const textStartX = W + textWidth / 2 + 60;
+      const textX      = lerp(textStartX, CX, prog);
+
+      // Particles
+      particles.forEach(p => {
+        if (!frozen) {
+          p.fx += p.vx * dt;  p.fy += p.vy * dt;
+          if (p.fx < 0 || p.fx > W) { p.vx *= -1; p.fx = Math.max(0, Math.min(W, p.fx)); }
+          if (p.fy < 0 || p.fy > H) { p.vy *= -1; p.fy = Math.max(0, Math.min(H, p.fy)); }
+          p.x = p.fx;
+          p.y = p.fy;
+        } else {
+          p.angle += ORBIT_SPD * dt;
+          const op = p.orbitPos();
+          p.x = lerp(p.frozenX, op.x, prog);
+          p.y = lerp(p.frozenY, op.y, prog);
+        }
+
+        ctx.globalAlpha = 0.65 + prog * 0.35;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+      });
+
+      ctx.globalAlpha = 1;
+
+      // Text on top — only render once it has started entering the viewport
+      if (textX < W + textWidth / 2 + 10) {
+        const fs = fontSize();
+        ctx.font          = `300 ${fs}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+        ctx.fillStyle     = '#1a1a1a';
+        ctx.textAlign     = 'center';
+        ctx.textBaseline  = 'middle';
+        ctx.fillText(TEXT, textX, CY);
+      }
+
+      requestAnimationFrame(animate);
+    }
+
+    requestAnimationFrame(animate);
+
+    // ── Resize ────────────────────────────────────────────────────────────────
+    window.addEventListener('resize', () => {
+      setSize();
+      frozen = false; scrollProg = 0;
+      buildParticles();
+    });
+  </script>
+</body>
+</html>

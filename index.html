@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Animations</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
+    }
+
+    iframe {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+    }
+
+    nav {
+      position: fixed;
+      top: 18px;
+      right: 20px;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 5px;
+      padding: 10px 12px;
+      background: rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-radius: 8px;
+    }
+
+    nav a {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 10px;
+      letter-spacing: 0.07em;
+      color: rgba(255, 255, 255, 0.38);
+      text-decoration: none;
+      transition: color 0.2s ease;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    nav a:hover {
+      color: rgba(255, 255, 255, 0.75);
+    }
+
+    nav a.active {
+      color: rgba(255, 255, 255, 0.95);
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+
+  <iframe id="frame" src=""></iframe>
+  <nav id="nav"></nav>
+
+  <script>
+    const animations = [
+      { label: "Particle Orbits", href: "ParticleAnimation.html" },
+      { label: "Clarity",         href: "ClarityAnimation.html" },
+      { label: "Logo Assembly",   href: "LogoRevealAnimation.html" },
+      { label: "Connected",       href: "ConstellationAnimation.html" },
+      { label: "Tear",            href: "TearAnimation.html" },
+      // Add new entries here ↓
+    ];
+
+    const frame = document.getElementById('frame');
+    const nav   = document.getElementById('nav');
+
+    function hashIndex() {
+      const n = parseInt(location.hash.slice(1));
+      return (Number.isFinite(n) && n >= 1 && n <= animations.length) ? n - 1 : 0;
+    }
+
+    function show(i) {
+      frame.src = animations[i].href;
+      location.hash = i + 1;
+      nav.querySelectorAll('a').forEach((a, j) => a.classList.toggle('active', j === i));
+    }
+
+    animations.forEach((anim, i) => {
+      const a = document.createElement('a');
+      a.textContent = `Animation ${i + 1}`;
+      a.href = `#${i + 1}`;
+      a.addEventListener('click', e => { e.preventDefault(); show(i); });
+      nav.appendChild(a);
+    });
+
+    show(hashIndex());
+    window.addEventListener('hashchange', () => show(hashIndex()));
+  </script>
+
+</body>
+</html>
