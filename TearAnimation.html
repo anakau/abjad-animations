@@ -50,43 +50,56 @@
       ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
       const fs = Math.round(100 * (W * 0.86) / ctx.measureText(TEXT).width);
 
-      // Tear front moves left → right with scroll.
-      // The opening GROWS behind the front: widest at the left edge (oldest tear),
-      // tapering to a point at tearX (fresh). Like real material splitting apart.
       const tearX   = prog * W;
-      const peelAmt = prog * CY * 1.4;  // left-edge opening = 1.4× half-screen
+      const peelAmt = prog * CY * 1.4;
+
+      // ── Zoom: scroll drives the main pull-in; sine adds constant forward motion
+      const zoomScroll = 1 + prog * 0.45;
+      const zoomOsc    = 1 + 0.018 * prog * Math.sin(ts * 0.00045);
+      const zoom       = zoomScroll * zoomOsc;
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.save();
+      ctx.translate(CX, CY);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-CX, -CY);
 
       // ── 1. Purple background ────────────────────────────────────────────
       ctx.fillStyle = '#7c3aed';
       ctx.fillRect(0, 0, W, H);
 
-      // ── 2. White top piece ──────────────────────────────────────────────
-      // Bottom edge: straight line from (0, CY−peelAmt) at the left
-      // down to the tear-front tip at (tearX, CY).
-      // Everything right of tearX stays at CY (untorn).
+      // ── 2. White top piece — organic bezier tear ────────────────────────
+      // The curve starts nearly horizontal at the tip (material just beginning
+      // to separate) then sweeps outward as it opens, like fabric peeling apart.
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(W, 0);
       ctx.lineTo(W, CY);
-      ctx.lineTo(tearX, CY);          // tear-front tip — halves only touch here
-      ctx.lineTo(0, CY - peelAmt);   // left edge, fully peeled open
+      ctx.lineTo(tearX, CY);
+      ctx.bezierCurveTo(
+        tearX * 0.76, CY - peelAmt * 0.05,   // cp1: barely lifts near tip
+        tearX * 0.18, CY - peelAmt * 1.08,   // cp2: curves out past left edge
+        0, CY - peelAmt
+      );
       ctx.closePath();
       ctx.fill();
 
-      // ── 3. White bottom piece (mirror of top) ──────────────────────────
+      // ── 3. White bottom piece (mirror of top) ───────────────────────────
       ctx.beginPath();
       ctx.moveTo(0, H);
       ctx.lineTo(W, H);
       ctx.lineTo(W, CY);
-      ctx.lineTo(tearX, CY);          // tear-front tip
-      ctx.lineTo(0, CY + peelAmt);   // left edge, fully peeled open
+      ctx.lineTo(tearX, CY);
+      ctx.bezierCurveTo(
+        tearX * 0.76, CY + peelAmt * 0.05,
+        tearX * 0.18, CY + peelAmt * 1.08,
+        0, CY + peelAmt
+      );
       ctx.closePath();
       ctx.fill();
 
       // ── 4. Tagline ──────────────────────────────────────────────────────
-      // At y=CY for any x < tearX the area is always purple (the gap between
-      // the two pieces is ≥ 0 there), so a rect clip to the torn region is safe.
       if (tearX > 1) {
         ctx.save();
         ctx.beginPath();
@@ -101,6 +114,8 @@
         ctx.fillText(TEXT, textX, CY);
         ctx.restore();
       }
+
+      ctx.restore(); // end zoom transform
 
       requestAnimationFrame(render);
     }
