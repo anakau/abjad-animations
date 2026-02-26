@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grid Slash</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #280833; overflow-x: hidden; }
+    #scroll-container { height: 500vh; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="scroll-container"></div>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+    let W, H, CX, CY;
+
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+    }
+    setSize();
+
+    const TEXT         = 'Bringing Clarity to Complexity';
+    const DOT_CLR      = '#B21EE3';
+    const TARGET_ANGLE = 65 * Math.PI / 180; // "/" in canvas coords
+    const COS65        = Math.cos(TARGET_ANGLE);
+    const SIN65        = Math.sin(TARGET_ANGLE);
+
+    // ── Shortest-path angle lerp ─────────────────────────────────────────────
+    function angleLerp(a, b, t) {
+      let diff = b - a;
+      while (diff >  Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      return a + diff * t;
+    }
+
+    // ── Particles (grid) ─────────────────────────────────────────────────────
+    let particles = [];
+    function initParticles() {
+      particles = [];
+
+      // Adaptive spacing: target ~300 particles regardless of screen size
+      const spacing = Math.sqrt(W * H / 300);
+      const cols    = Math.round(W / spacing) + 2;
+      const rows    = Math.round(H / spacing) + 2;
+      const startX  = (W - (cols - 1) * spacing) / 2;
+      const startY  = (H - (rows - 1) * spacing) / 2;
+      const half    = Math.hypot(W, H) * 0.64; // diagonal slash half-length
+
+      // Build grid
+      const grid = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          grid.push({ gx: startX + c * spacing, gy: startY + r * spacing });
+        }
+      }
+
+      // Sort by projection onto the "/" direction (upper-right = highest proj)
+      // so the sweep reads right → left as the slash forms.
+      const proj = g => g.gx * COS65 - g.gy * SIN65;
+      grid.sort((a, b) => proj(b) - proj(a));
+
+      const N = grid.length;
+      grid.forEach((g, i) => {
+        const t  = i / (N - 1); // 0 = upper-right end, 1 = lower-left end
+        const tx = CX + (1 - 2 * t) * half * COS65;
+        const ty = CY - (1 - 2 * t) * half * SIN65;
+
+        particles.push({
+          gx:     g.gx,
+          gy:     g.gy,
+          angle:  Math.random() * Math.PI,           // random start orientation [0, π]
+          angVel: (Math.random() * 0.065 + 0.028)  // rotation speed — ~3× faster
+                  * (Math.random() < 0.5 ? 1 : -1), // CW or CCW
+          len:    spacing * 2,                       // tip-to-tip = 2× grid spacing,
+                                                     // so each tip touches the adjacent node
+          lw:     Math.random() * 1.5 + 0.8,       // line width [0.8, 2.3]
+          tx, ty,
+          delay:  1 - t,           // 1 = upper-right (aligns first for R→L sweep)
+          side:   tx >= CX ? 1 : -1, // +1 slides right, -1 slides left
+          sa:     0,               // snapped angle at alignment start
+        });
+      });
+    }
+    initParticles();
+
+    // ── Scroll ──────────────────────────────────────────────────────────────
+    let scrollProg = 0;
+    window.addEventListener('scroll', () => {
+      const max  = document.body.scrollHeight - window.innerHeight;
+      scrollProg = Math.min(1, window.scrollY / (max * 0.85));
+    });
+
+    const ease  = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+    const lerp  = (a, b, t) => a + (b - a) * t;
+    const clamp = (t, a = 0, b = 1) => Math.max(a, Math.min(b, t));
+    const sub   = (t, a, b) => clamp((t - a) / (b - a));
+
+    // Phase milestones (eased scroll progress)
+    const PH = {
+      alignEnd: 0.55, // grid slashes merged into giant "/" — sweeps right to left
+      holdEnd:  0.62, // brief pause — full slash visible + glow blip
+      splitEnd: 0.90, // elevator doors open, text reveals
+    };
+
+    let snapped = false;
+    let lastTS  = 0;
+
+    // ── Render ──────────────────────────────────────────────────────────────
+    function render(ts) {
+      const dt = Math.min((ts - lastTS) / 16.67, 3);
+      lastTS = ts;
+
+      const prog   = ease(scrollProg);
+      const pAlign = sub(prog, 0,            PH.alignEnd);
+      const pHold  = sub(prog, PH.alignEnd,  PH.holdEnd);
+      const pSplit = sub(prog, PH.holdEnd,   PH.splitEnd);
+
+      // Glow blip: builds as last slashes snap into line, fades through hold
+      const glowBuild = sub(pAlign, 0.78, 1.0);
+      const glowFade  = 1 - ease(pHold);
+      const glow      = prog < PH.alignEnd ? glowBuild : glowFade;
+
+      // Snap each particle's current angle the moment alignment begins
+      if (pAlign > 0 && !snapped) {
+        snapped = true;
+        particles.forEach(p => { p.sa = p.angle; });
+      }
+      if (pAlign === 0) snapped = false;
+
+      // Continuous rotation — only while grid is free (no alignment)
+      if (pAlign === 0) {
+        particles.forEach(p => { p.angle += p.angVel * dt; });
+      }
+
+      // Compute each particle's draw state
+      const pts = particles.map(p => {
+        // Grid position is always the base; no snapshot needed (it's fixed)
+        let x     = p.gx;
+        let y     = p.gy;
+        let angle = p.angle;
+
+        if (pAlign > 0) {
+          // Staggered convergence: upper-right (delay=1, startPct=0) aligns first
+          const startPct = (1 - p.delay) * 0.38;
+          const pa       = sub(pAlign, startPct, startPct + 0.62);
+          const t        = ease(pa);
+          x     = lerp(p.gx, p.tx, t);
+          y     = lerp(p.gy, p.ty, t);
+          angle = angleLerp(p.sa, TARGET_ANGLE, ease(pa)); // shortest-path rotation
+        }
+
+        if (pSplit > 0) {
+          x += p.side * ease(pSplit) * W * 0.72;
+        }
+
+        return { x, y, angle, len: p.len, lw: p.lw };
+      });
+
+      // ── CLEAR + BACKGROUND ────────────────────────────────────────────────
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#280833';
+      ctx.fillRect(0, 0, W, H);
+
+      // ── 1. Slashes ────────────────────────────────────────────────────────
+      // Grid phase:    each slash sits at its grid position, spinning individually
+      // Align phase:   positions converge to diagonal, angles converge to 65°
+      // Hold phase:    fully formed giant "/" brushstroke
+      // Split phase:   two panels slide apart, text is revealed
+
+      // Stroke color: #B21EE3 → #ffffff at glow peak, then back
+      const sr = Math.round(lerp(178, 255, glow));
+      const sg = Math.round(lerp(30,  255, glow));
+      const sb = Math.round(lerp(227, 255, glow));
+      const strokeClr = `rgb(${sr},${sg},${sb})`;
+
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = strokeClr;
+      ctx.lineCap     = 'round';
+
+      // Glow pass — drawn underneath crisp strokes
+      if (glow > 0.01) {
+        ctx.shadowColor = '#cc44ff';
+        ctx.shadowBlur  = glow * 45;
+        pts.forEach(pt => {
+          const cosA = Math.cos(pt.angle);
+          const sinA = Math.sin(pt.angle);
+          const hl   = pt.len / 2;
+          ctx.lineWidth = pt.lw * (1 + glow * 1.2);
+          ctx.beginPath();
+          ctx.moveTo(pt.x - cosA * hl, pt.y + sinA * hl);
+          ctx.lineTo(pt.x + cosA * hl, pt.y - sinA * hl);
+          ctx.stroke();
+        });
+        ctx.shadowBlur = 0;
+      }
+
+      // Crisp pass — always on top
+      pts.forEach(pt => {
+        const cosA = Math.cos(pt.angle);
+        const sinA = Math.sin(pt.angle);
+        const hl   = pt.len / 2;
+        ctx.lineWidth = pt.lw;
+        ctx.beginPath();
+        ctx.moveTo(pt.x - cosA * hl, pt.y + sinA * hl);
+        ctx.lineTo(pt.x + cosA * hl, pt.y - sinA * hl);
+        ctx.stroke();
+      });
+
+      // ── 2. Text — revealed through the widening gap ───────────────────────
+      if (pSplit > 0) {
+        ctx.save();
+
+        ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+        const fs = Math.round(100 * (W * 0.43) / ctx.measureText(TEXT).width);
+        ctx.font = `300 ${fs}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+
+        const gapHalf = ease(pSplit) * W * 0.72;
+        ctx.beginPath();
+        ctx.rect(CX - gapHalf, 0, gapHalf * 2, H);
+        ctx.clip();
+
+        ctx.globalAlpha  = Math.min(1, (pSplit - 0.08) / 0.42);
+        ctx.fillStyle    = '#ffffff';
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(TEXT, CX, CY);
+        ctx.restore();
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+    window.addEventListener('resize', () => { setSize(); initParticles(); });
+  </script>
+</body>
+</html>
