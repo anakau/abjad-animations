@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Slash</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #280833; overflow-x: hidden; }
+    #scroll-container { height: 500vh; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="scroll-container"></div>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+    let W, H, CX, CY;
+
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+    }
+    setSize();
+
+    const TEXT    = 'Bringing Clarity to Complexity';
+    const DOT_CLR = '#B21EE3';
+    const NUM     = 280;
+
+    // 65° slash geometry — same angle as ImplodeAnimation
+    const COS65 = Math.cos(65 * Math.PI / 180); // ≈ 0.4226
+    const SIN65 = Math.sin(65 * Math.PI / 180); // ≈ 0.9063
+
+    // ── Particles ───────────────────────────────────────────────────────────
+    let particles = [];
+    function initParticles() {
+      particles = [];
+      // half-length of the giant slash — long enough to cross the screen diagonally
+      const half = Math.hypot(W, H) * 0.64;
+      for (let i = 0; i < NUM; i++) {
+        const t = i / (NUM - 1); // 0 = upper-right end of "/",  1 = lower-left end
+
+        // All target positions lie on the same 65° line through (CX, CY).
+        // Because they are collinear AND all slashes are at 65°, when aligned
+        // every particle's stroke overlaps on one continuous diagonal brushstroke.
+        const tx = CX + (1 - 2 * t) * half * COS65; // upper-right → lower-left
+        const ty = CY - (1 - 2 * t) * half * SIN65;
+
+        particles.push({
+          x:    Math.random() * W,
+          y:    Math.random() * H,
+          vx:   (Math.random() - 0.5) * 2.5,
+          vy:   (Math.random() - 0.5) * 2.5,
+          len:  Math.random() * 14 + 8,       // slash length [8, 22]
+          lw:   Math.random() * 1.5 + 0.8,   // line width [0.8, 2.3]
+          tx, ty,
+          // Sweep stagger: upper-right (t≈0, delay≈1) aligns first → right-to-left sweep
+          delay: 1 - t,
+          side:  tx >= CX ? 1 : -1, // +1 = slides right,  -1 = slides left
+          sx: 0, sy: 0,             // float-position snapshot
+        });
+      }
+    }
+    initParticles();
+
+    // ── Scroll ──────────────────────────────────────────────────────────────
+    let scrollProg = 0;
+    window.addEventListener('scroll', () => {
+      const max  = document.body.scrollHeight - window.innerHeight;
+      scrollProg = Math.min(1, window.scrollY / (max * 0.85));
+    });
+
+    const ease  = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+    const lerp  = (a, b, t) => a + (b - a) * t;
+    const clamp = (t, a = 0, b = 1) => Math.max(a, Math.min(b, t));
+    const sub   = (t, a, b) => clamp((t - a) / (b - a));
+
+    // Phase milestones (eased scroll progress)
+    const PH = {
+      floatEnd: 0.28, // particles floating freely
+      alignEnd: 0.60, // all slashes merged into giant "/" — sweeps right to left
+      holdEnd:  0.67, // brief pause — full slash visible
+      splitEnd: 0.93, // elevator doors open — slash splits left/right, text reveals
+    };
+
+    let snapped = false;
+    let lastTS  = 0;
+
+    // ── Render ──────────────────────────────────────────────────────────────
+    function render(ts) {
+      const dt = Math.min((ts - lastTS) / 16.67, 3);
+      lastTS = ts;
+
+      const prog     = ease(scrollProg);
+      const pAlign   = sub(prog, PH.floatEnd, PH.alignEnd);
+      const pHold    = sub(prog, PH.alignEnd, PH.holdEnd);
+      const pSplit   = sub(prog, PH.holdEnd,  PH.splitEnd);
+
+      // Glow blip: builds in the last 22% of align (as final slashes land),
+      // peaks at the moment the slash is complete, then fades through the hold.
+      const glowBuild = sub(pAlign, 0.78, 1.0);
+      const glowFade  = 1 - ease(pHold);
+      const glow      = prog < PH.alignEnd ? glowBuild : glowFade;
+
+      // Snapshot float positions the moment alignment begins
+      if (pAlign > 0 && !snapped) {
+        snapped = true;
+        particles.forEach(p => { p.sx = p.x; p.sy = p.y; });
+      }
+      if (pAlign === 0) snapped = false;
+
+      // Float physics — only while not aligning
+      if (pAlign === 0) {
+        particles.forEach(p => {
+          p.x += p.vx * dt;
+          p.y += p.vy * dt;
+          p.vx += (Math.random() - 0.5) * 0.30;
+          p.vy += (Math.random() - 0.5) * 0.30;
+          const spd = Math.hypot(p.vx, p.vy);
+          if (spd > 3.8) { p.vx *= 3.8 / spd; p.vy *= 3.8 / spd; }
+          // Wrap
+          if (p.x < 0) p.x = W; if (p.x > W) p.x = 0;
+          if (p.y < 0) p.y = H; if (p.y > H) p.y = 0;
+        });
+      }
+
+      // Compute each particle's draw position
+      const pts = particles.map(p => {
+        let x = p.x, y = p.y;
+
+        if (pAlign > 0) {
+          // Each particle has a staggered start so the slash "draws" right → left.
+          // delay=1 (rightmost) → startPct=0 (aligns first)
+          // delay=0 (leftmost)  → startPct=0.38 (aligns last)
+          const startPct = (1 - p.delay) * 0.38;
+          const pa = sub(pAlign, startPct, startPct + 0.62);
+          x = lerp(p.sx, p.tx, ease(pa));
+          y = lerp(p.sy, p.ty, ease(pa));
+        }
+
+        if (pSplit > 0) {
+          // Uniform horizontal offset — left half goes left, right half goes right.
+          // Uniform = clean elevator-door panel effect.
+          x += p.side * ease(pSplit) * W * 0.72;
+        }
+
+        return { x, y, len: p.len, lw: p.lw };
+      });
+
+      // ── CLEAR + BACKGROUND ────────────────────────────────────────────────
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#280833';
+      ctx.fillRect(0, 0, W, H);
+
+      // ── 1. Connection lines (float phase only) ────────────────────────────
+      if (pAlign === 0) {
+        ctx.strokeStyle = DOT_CLR;
+        ctx.lineWidth   = 0.5;
+        for (let i = 0; i < pts.length; i++) {
+          for (let j = i + 1; j < pts.length; j++) {
+            const d = Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y);
+            if (d < 120) {
+              ctx.globalAlpha = (1 - d / 120) * 0.15;
+              ctx.beginPath();
+              ctx.moveTo(pts[i].x, pts[i].y);
+              ctx.lineTo(pts[j].x, pts[j].y);
+              ctx.stroke();
+            }
+          }
+        }
+      }
+
+      // ── 2. Slashes ────────────────────────────────────────────────────────
+      // During alignment all strokes are collinear → merge into one brushstroke.
+      // During split the two halves slide apart horizontally like elevator panels.
+
+      // Stroke color lerps from #B21EE3 → #ffffff as glow rises, back on fade
+      const sr = Math.round(lerp(178, 255, glow));
+      const sg = Math.round(lerp(30,  255, glow));
+      const sb = Math.round(lerp(227, 255, glow));
+      const strokeClr = `rgb(${sr},${sg},${sb})`;
+
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = strokeClr;
+      ctx.lineCap     = 'round';
+
+      // Glow pass — drawn first so the crisp strokes sit on top
+      if (glow > 0.01) {
+        ctx.shadowColor = '#cc44ff';
+        ctx.shadowBlur  = glow * 45;
+        pts.forEach(pt => {
+          const hl = pt.len / 2;
+          ctx.lineWidth = pt.lw * (1 + glow * 1.2); // swell slightly at peak
+          ctx.beginPath();
+          ctx.moveTo(pt.x - COS65 * hl, pt.y + SIN65 * hl);
+          ctx.lineTo(pt.x + COS65 * hl, pt.y - SIN65 * hl);
+          ctx.stroke();
+        });
+        ctx.shadowBlur = 0;
+      }
+
+      // Crisp stroke pass — always drawn on top
+      pts.forEach(pt => {
+        const hl = pt.len / 2;
+        ctx.lineWidth = pt.lw;
+        ctx.beginPath();
+        ctx.moveTo(pt.x - COS65 * hl, pt.y + SIN65 * hl); // lower-left tip
+        ctx.lineTo(pt.x + COS65 * hl, pt.y - SIN65 * hl); // upper-right tip
+        ctx.stroke();
+      });
+
+      // ── 3. Text — revealed through the widening gap ───────────────────────
+      if (pSplit > 0) {
+        ctx.save();
+
+        // Size to 43% of screen width (same as ImplodeAnimation)
+        ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+        const fs = Math.round(100 * (W * 0.43) / ctx.measureText(TEXT).width);
+        ctx.font = `300 ${fs}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+
+        // Clip matches the actual gap between the two sliding slash panels.
+        // gapHalf = how far each panel has moved from center → gap is 2× that.
+        const gapHalf = ease(pSplit) * W * 0.72;
+        ctx.beginPath();
+        ctx.rect(CX - gapHalf, 0, gapHalf * 2, H);
+        ctx.clip();
+
+        ctx.globalAlpha  = Math.min(1, (pSplit - 0.08) / 0.42);
+        ctx.fillStyle    = '#ffffff';
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(TEXT, CX, CY);
+        ctx.restore();
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+    window.addEventListener('resize', () => { setSize(); initParticles(); });
+  </script>
+</body>
+</html>
