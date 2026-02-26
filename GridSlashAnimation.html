@@ -32,6 +32,7 @@
     const TARGET_ANGLE = 65 * Math.PI / 180; // "/" in canvas coords
     const COS65        = Math.cos(TARGET_ANGLE);
     const SIN65        = Math.sin(TARGET_ANGLE);
+    const SYM_ANGLE    = 0; // all hands point horizontal during symmetry phase
 
     // ── Shortest-path angle lerp ─────────────────────────────────────────────
     function angleLerp(a, b, t) {
@@ -76,16 +77,17 @@
         particles.push({
           gx:     g.gx,
           gy:     g.gy,
-          angle:  Math.random() * Math.PI,           // random start orientation [0, π]
-          angVel: (Math.random() * 0.065 + 0.028)  // rotation speed — ~3× faster
-                  * (Math.random() < 0.5 ? 1 : -1), // CW or CCW
-          len:    spacing * 2,                       // tip-to-tip = 2× grid spacing,
-                                                     // so each tip touches the adjacent node
+          angle:       Math.round(Math.random() * 3) * Math.PI / 2, // current drawn angle
+          targetAngle: Math.round(Math.random() * 3) * Math.PI / 2, // destination angle
+          timer:       Math.random() * 60 + 30,         // frames until next 90° target change
+          len:    spacing,                            // pivot-to-tip = grid spacing,
+                                                     // so the rotating tip reaches the adjacent node
           lw:     Math.random() * 1.5 + 0.8,       // line width [0.8, 2.3]
           tx, ty,
           delay:  1 - t,           // 1 = upper-right (aligns first for R→L sweep)
           side:   tx >= CX ? 1 : -1, // +1 slides right, -1 slides left
-          sa:     0,               // snapped angle at alignment start
+          symAngle: 0,             // snapped angle at sym phase start
+          sa:       0,             // snapped angle at alignment start
         });
       });
     }
@@ -105,12 +107,14 @@
 
     // Phase milestones (eased scroll progress)
     const PH = {
-      alignEnd: 0.55, // grid slashes merged into giant "/" — sweeps right to left
-      holdEnd:  0.62, // brief pause — full slash visible + glow blip
-      splitEnd: 0.90, // elevator doors open, text reveals
+      symEnd:   0.28, // all hands eased to horizontal — grid settles into order
+      alignEnd: 0.60, // grid slashes merged into giant "/" — sweeps right to left
+      holdEnd:  0.67, // brief pause — full slash visible + glow blip
+      splitEnd: 0.92, // elevator doors open, text reveals
     };
 
-    let snapped = false;
+    let snapped    = false;
+    let symSnapped = false;
     let lastTS  = 0;
 
     // ── Render ──────────────────────────────────────────────────────────────
@@ -119,25 +123,45 @@
       lastTS = ts;
 
       const prog   = ease(scrollProg);
-      const pAlign = sub(prog, 0,            PH.alignEnd);
-      const pHold  = sub(prog, PH.alignEnd,  PH.holdEnd);
-      const pSplit = sub(prog, PH.holdEnd,   PH.splitEnd);
+      const pSym   = sub(prog, 0,           PH.symEnd);
+      const pAlign = sub(prog, PH.symEnd,   PH.alignEnd);
+      const pHold  = sub(prog, PH.alignEnd, PH.holdEnd);
+      const pSplit = sub(prog, PH.holdEnd,  PH.splitEnd);
 
       // Glow blip: builds as last slashes snap into line, fades through hold
       const glowBuild = sub(pAlign, 0.78, 1.0);
       const glowFade  = 1 - ease(pHold);
       const glow      = prog < PH.alignEnd ? glowBuild : glowFade;
 
-      // Snap each particle's current angle the moment alignment begins
+      // Snap organic angles at start of sym phase
+      if (pSym > 0 && !symSnapped) {
+        symSnapped = true;
+        particles.forEach(p => { p.symAngle = p.angle; });
+      }
+      if (pSym === 0) symSnapped = false;
+
+      // Snap sym angle at start of align phase (pSym=1 here, so effective angle = SYM_ANGLE)
       if (pAlign > 0 && !snapped) {
         snapped = true;
-        particles.forEach(p => { p.sa = p.angle; });
+        particles.forEach(p => { p.sa = angleLerp(p.symAngle, SYM_ANGLE, ease(pSym)); });
       }
       if (pAlign === 0) snapped = false;
 
-      // Continuous rotation — only while grid is free (no alignment)
-      if (pAlign === 0) {
-        particles.forEach(p => { p.angle += p.angVel * dt; });
+      // Organic 90° turns — only while grid is idle (before sym phase)
+      if (pSym === 0) {
+        particles.forEach(p => {
+          // Schedule a new 90° target at random intervals
+          p.timer -= dt;
+          if (p.timer <= 0) {
+            p.targetAngle += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
+            p.timer = Math.random() * 60 + 30;
+          }
+          // Smoothly ease current angle toward target (exponential decay)
+          let diff = p.targetAngle - p.angle;
+          while (diff >  Math.PI) diff -= 2 * Math.PI;
+          while (diff < -Math.PI) diff += 2 * Math.PI;
+          p.angle += diff * 0.08 * dt;
+        });
       }
 
       // Compute each particle's draw state
@@ -146,6 +170,11 @@
         let x     = p.gx;
         let y     = p.gy;
         let angle = p.angle;
+
+        // Sym phase: ease all hands to horizontal from their grid positions
+        if (pSym > 0 && pAlign === 0) {
+          angle = angleLerp(p.symAngle, SYM_ANGLE, ease(pSym));
+        }
 
         if (pAlign > 0) {
           // Staggered convergence: upper-right (delay=1, startPct=0) aligns first
@@ -192,11 +221,10 @@
         pts.forEach(pt => {
           const cosA = Math.cos(pt.angle);
           const sinA = Math.sin(pt.angle);
-          const hl   = pt.len / 2;
           ctx.lineWidth = pt.lw * (1 + glow * 1.2);
           ctx.beginPath();
-          ctx.moveTo(pt.x - cosA * hl, pt.y + sinA * hl);
-          ctx.lineTo(pt.x + cosA * hl, pt.y - sinA * hl);
+          ctx.moveTo(pt.x, pt.y);
+          ctx.lineTo(pt.x + cosA * pt.len, pt.y - sinA * pt.len);
           ctx.stroke();
         });
         ctx.shadowBlur = 0;
@@ -206,11 +234,10 @@
       pts.forEach(pt => {
         const cosA = Math.cos(pt.angle);
         const sinA = Math.sin(pt.angle);
-        const hl   = pt.len / 2;
         ctx.lineWidth = pt.lw;
         ctx.beginPath();
-        ctx.moveTo(pt.x - cosA * hl, pt.y + sinA * hl);
-        ctx.lineTo(pt.x + cosA * hl, pt.y - sinA * hl);
+        ctx.moveTo(pt.x, pt.y);
+        ctx.lineTo(pt.x + cosA * pt.len, pt.y - sinA * pt.len);
         ctx.stroke();
       });
 
