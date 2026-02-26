@@ -80,8 +80,7 @@
           angle:       Math.round(Math.random() * 3) * Math.PI / 2, // current drawn angle
           targetAngle: Math.round(Math.random() * 3) * Math.PI / 2, // destination angle
           timer:       Math.random() * 60 + 30,         // frames until next 90° target change
-          len:    spacing,                            // pivot-to-tip = grid spacing,
-                                                     // so the rotating tip reaches the adjacent node
+          len:    spacing * 0.65,                     // pivot-to-tip = 65% of grid spacing
           lw:     Math.random() * 1.5 + 0.8,       // line width [0.8, 2.3]
           tx, ty,
           delay:  1 - t,           // 1 = upper-right (aligns first for R→L sweep)
