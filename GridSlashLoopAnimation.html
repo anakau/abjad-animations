@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grid Slash Loop</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #280833; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+    let W, H, CX, CY;
+
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+    }
+    setSize();
+
+    const TEXT         = 'Bringing Clarity to Complexity';
+    const DOT_CLR      = '#B21EE3';
+    const TARGET_ANGLE = 65 * Math.PI / 180;
+    const COS65        = Math.cos(TARGET_ANGLE);
+    const SIN65        = Math.sin(TARGET_ANGLE);
+    const SYM_ANGLE    = 0;
+
+    // ── Shortest-path angle lerp ─────────────────────────────────────────────
+    function angleLerp(a, b, t) {
+      let diff = b - a;
+      while (diff >  Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      return a + diff * t;
+    }
+
+    // ── Particles (grid) ─────────────────────────────────────────────────────
+    let particles = [];
+    function initParticles() {
+      particles = [];
+
+      const spacing = Math.sqrt(W * H / 300);
+      const cols    = Math.round(W / spacing) + 2;
+      const rows    = Math.round(H / spacing) + 2;
+      const startX  = (W - (cols - 1) * spacing) / 2;
+      const startY  = (H - (rows - 1) * spacing) / 2;
+      const half    = Math.hypot(W, H) * 0.64;
+
+      const grid = [];
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          grid.push({ gx: startX + c * spacing, gy: startY + r * spacing });
+        }
+      }
+
+      const proj = g => g.gx * COS65 - g.gy * SIN65;
+      grid.sort((a, b) => proj(b) - proj(a));
+
+      const N = grid.length;
+      grid.forEach((g, i) => {
+        const t  = i / (N - 1);
+        const tx = CX + (1 - 2 * t) * half * COS65;
+        const ty = CY - (1 - 2 * t) * half * SIN65;
+
+        particles.push({
+          gx:          g.gx,
+          gy:          g.gy,
+          angle:       Math.round(Math.random() * 3) * Math.PI / 2,
+          targetAngle: Math.round(Math.random() * 3) * Math.PI / 2,
+          timer:       Math.random() * 60 + 30,
+          len:         spacing * 0.65,
+          lw:          Math.random() * 1.5 + 0.8,
+          tx, ty,
+          delay:       1 - t,
+          side:        tx >= CX ? 1 : -1,
+          symAngle:    0,
+          sa:          0,
+        });
+      });
+    }
+    initParticles();
+
+    // ── Auto-play timing ─────────────────────────────────────────────────────
+    // Each cycle: organic → sym → align → hold → split → hold → fade out → loop
+    const ORGANIC_S = 1.5;  // idle organic motion before animation starts
+    const ANIM_S    = 6.0;  // scrollProg ramps 0 → 1
+    const HOLD_S    = 1.5;  // text fully visible
+    const FADE_S    = 0.7;  // fade to background before reset
+    const FADEIN_S  = 0.5;  // fade in from background at cycle start
+    const TOTAL_S   = ORGANIC_S + ANIM_S + HOLD_S + FADE_S;
+
+    let cycleStart = null;
+
+    const ease  = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+    const lerp  = (a, b, t) => a + (b - a) * t;
+    const clamp = (t, a = 0, b = 1) => Math.max(a, Math.min(b, t));
+    const sub   = (t, a, b) => clamp((t - a) / (b - a));
+
+    // Phase milestones (as fraction of scrollProg 0→1)
+    const PH = {
+      symEnd:   0.28,
+      alignEnd: 0.60,
+      holdEnd:  0.67,
+      splitEnd: 0.92,
+    };
+
+    let snapped    = false;
+    let symSnapped = false;
+    let lastTS     = 0;
+
+    // ── Render ───────────────────────────────────────────────────────────────
+    function render(ts) {
+      const dt = Math.min((ts - lastTS) / 16.67, 3);
+      lastTS = ts;
+
+      if (cycleStart === null) cycleStart = ts;
+      const cycleSec = ((ts - cycleStart) / 1000) % TOTAL_S;
+
+      // Drive scrollProg from time: flat at 0 during organic phase, then ramp
+      const scrollProg = cycleSec < ORGANIC_S
+        ? 0
+        : Math.min(1, (cycleSec - ORGANIC_S) / ANIM_S);
+
+      // Fade overlay: fade in at cycle start, fade out before reset
+      const fadeOutT = sub(cycleSec, ORGANIC_S + ANIM_S + HOLD_S, TOTAL_S);
+      const fadeInT  = cycleSec < FADEIN_S ? 1 - cycleSec / FADEIN_S : 0;
+      const overlay  = Math.max(ease(fadeOutT), fadeInT);
+
+      const prog   = ease(scrollProg);
+      const pSym   = sub(prog, 0,           PH.symEnd);
+      const pAlign = sub(prog, PH.symEnd,   PH.alignEnd);
+      const pHold  = sub(prog, PH.alignEnd, PH.holdEnd);
+      const pSplit = sub(prog, PH.holdEnd,  PH.splitEnd);
+
+      // Glow blip
+      const glowBuild = sub(pAlign, 0.78, 1.0);
+      const glowFade  = 1 - ease(pHold);
+      const glow      = prog < PH.alignEnd ? glowBuild : glowFade;
+
+      // Snap organic angles at start of sym phase
+      if (pSym > 0 && !symSnapped) {
+        symSnapped = true;
+        particles.forEach(p => { p.symAngle = p.angle; });
+      }
+      if (pSym === 0) symSnapped = false;
+
+      // Snap sym angle at start of align phase
+      if (pAlign > 0 && !snapped) {
+        snapped = true;
+        particles.forEach(p => { p.sa = angleLerp(p.symAngle, SYM_ANGLE, ease(pSym)); });
+      }
+      if (pAlign === 0) snapped = false;
+
+      // Organic 90° turns — only while grid is idle
+      if (pSym === 0) {
+        particles.forEach(p => {
+          p.timer -= dt;
+          if (p.timer <= 0) {
+            p.targetAngle += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
+            p.timer = Math.random() * 60 + 30;
+          }
+          let diff = p.targetAngle - p.angle;
+          while (diff >  Math.PI) diff -= 2 * Math.PI;
+          while (diff < -Math.PI) diff += 2 * Math.PI;
+          p.angle += diff * 0.08 * dt;
+        });
+      }
+
+      // Compute each particle's draw state
+      const pts = particles.map(p => {
+        let x     = p.gx;
+        let y     = p.gy;
+        let angle = p.angle;
+
+        if (pSym > 0 && pAlign === 0) {
+          angle = angleLerp(p.symAngle, SYM_ANGLE, ease(pSym));
+        }
+
+        if (pAlign > 0) {
+          const startPct = (1 - p.delay) * 0.38;
+          const pa       = sub(pAlign, startPct, startPct + 0.62);
+          const t        = ease(pa);
+          x     = lerp(p.gx, p.tx, t);
+          y     = lerp(p.gy, p.ty, t);
+          angle = angleLerp(p.sa, TARGET_ANGLE, ease(pa));
+        }
+
+        if (pSplit > 0) {
+          x += p.side * ease(pSplit) * W * 0.72;
+        }
+
+        return { x, y, angle, len: p.len, lw: p.lw };
+      });
+
+      // ── CLEAR + BACKGROUND ────────────────────────────────────────────────
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#280833';
+      ctx.fillRect(0, 0, W, H);
+
+      // ── 1. Slashes ────────────────────────────────────────────────────────
+      const sr = Math.round(lerp(178, 255, glow));
+      const sg = Math.round(lerp(30,  255, glow));
+      const sb = Math.round(lerp(227, 255, glow));
+      const strokeClr = `rgb(${sr},${sg},${sb})`;
+
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = strokeClr;
+      ctx.lineCap     = 'round';
+
+      if (glow > 0.01) {
+        ctx.shadowColor = '#cc44ff';
+        ctx.shadowBlur  = glow * 45;
+        pts.forEach(pt => {
+          const cosA = Math.cos(pt.angle);
+          const sinA = Math.sin(pt.angle);
+          ctx.lineWidth = pt.lw * (1 + glow * 1.2);
+          ctx.beginPath();
+          ctx.moveTo(pt.x, pt.y);
+          ctx.lineTo(pt.x + cosA * pt.len, pt.y - sinA * pt.len);
+          ctx.stroke();
+        });
+        ctx.shadowBlur = 0;
+      }
+
+      pts.forEach(pt => {
+        const cosA = Math.cos(pt.angle);
+        const sinA = Math.sin(pt.angle);
+        ctx.lineWidth = pt.lw;
+        ctx.beginPath();
+        ctx.moveTo(pt.x, pt.y);
+        ctx.lineTo(pt.x + cosA * pt.len, pt.y - sinA * pt.len);
+        ctx.stroke();
+      });
+
+      // ── 2. Text ───────────────────────────────────────────────────────────
+      if (pSplit > 0) {
+        ctx.save();
+
+        ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+        const fs = Math.round(100 * (W * 0.43) / ctx.measureText(TEXT).width);
+        ctx.font = `300 ${fs}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+
+        const gapHalf = ease(pSplit) * W * 0.72;
+        ctx.beginPath();
+        ctx.rect(CX - gapHalf, 0, gapHalf * 2, H);
+        ctx.clip();
+
+        ctx.globalAlpha  = Math.min(1, (pSplit - 0.08) / 0.42);
+        ctx.fillStyle    = '#ffffff';
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(TEXT, CX, CY);
+        ctx.restore();
+      }
+
+      // ── 3. Fade overlay (covers reset jump between cycles) ────────────────
+      if (overlay > 0) {
+        ctx.globalAlpha = overlay;
+        ctx.fillStyle   = '#280833';
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalAlpha = 1;
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+    window.addEventListener('resize', () => { setSize(); initParticles(); });
+  </script>
+</body>
+</html>
