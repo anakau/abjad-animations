@@ -29,10 +29,14 @@
     const SQ           = 7;
     const CONN_DIST    = 120;
     const CONN_DIST_SQ = CONN_DIST * CONN_DIST;
+    const CHAIN_DIST    = 85;   // slightly > typical grid spacing — triggers cardinal neighbors
+    const CHAIN_DIST_SQ = CHAIN_DIST * CHAIN_DIST;
+    const CHAIN_DELAY   = 0.005; // prog units between chain hops (~40 ms at 8 s cycle)
+    const TEXT_AHEAD    = 80;    // px ahead of text leading edge to trigger particles
     const ALPHA        = 0.70;
     const C_OUTLINE    = '#B21EE3';
     const C_BG         = '#280833';
-    const C_TEXT       = '#B21EE3'; // light purple end state
+    const C_TEXT       = '#B21EE3';
 
     // ── Utilities ──────────────────────────────────────────────────────────────
     const ease  = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
@@ -87,30 +91,26 @@
           const gx = startX + c * spacing;
           const gy = startY + r * spacing;
 
-          // Expulsion direction: away from text (CX, CY) with slight jitter
+          // Expulsion direction: radially away from center with slight jitter
           const dx  = gx - CX;
           const dy  = gy - CY;
           const len = Math.hypot(dx, dy) || 1;
           const nx  = dx / len + (Math.random() - 0.5) * 0.25;
           const ny  = dy / len + (Math.random() - 0.5) * 0.25;
-
-          // Enough travel to fully exit any screen
           const travelDist = Math.max(W, H) * 1.7;
 
-          // Delay: right-side particles go first (text enters from right),
-          // left-side particles go last. Row distance adds the vertical wave.
-          const horzDelay  = clamp(1 - gx / W, 0, 1);                    // right=0, left=1
-          const rowDelay   = clamp(Math.abs(gy - CY) / (H * 0.5), 0, 1); // center=0, edges=1
-          const expelDelay = clamp(horzDelay * 0.6 + rowDelay * 0.4, 0, 1);
+          // Right-side particles fly fast; left-side drift slower
+          const expelDur = lerp(0.12, 0.22, clamp(1 - gx / W, 0, 1));
 
           particles.push({
-            fx: Math.random() * W,           // floating x (random start)
-            fy: Math.random() * H,           // floating y
+            fx: Math.random() * W,
+            fy: Math.random() * H,
             vx: (Math.random() - 0.5) * 0.5,
             vy: (Math.random() - 0.5) * 0.5,
             gx, gy,
-            expelDelay,
-            expelTx: gx + nx * travelDist,  // landing pos when expelled
+            triggerTime: -1,   // prog value when triggered; -1 = not yet
+            expelDur,
+            expelTx: gx + nx * travelDist,
             expelTy: gy + ny * travelDist,
             isLogo: inLogo(gx, gy),
           });
@@ -120,18 +120,16 @@
     initParticles();
 
     // ── Autoplay clock ─────────────────────────────────────────────────────────
-    const DURATION = 8000; // total animation length in ms
+    const DURATION = 8000;
     let startTime  = null;
     let prog       = 0;
 
-    // Phase milestones — direct fractions of DURATION
-    // 8 s: sym 0→1.44s | logo 1.44→2.88s | text+expel 2.88→5.44s | fade 5.44→6.72s | dark 6.72→8s
     const PH = {
-      symEnd:   0.18,  // floating → grid
-      logoEnd:  0.36,  // logo squares light up white
-      textEnd:  0.56,  // tagline arrives at center
-      expelEnd: 0.68,  // all particles gone (~1s after text first appears)
-      fadeEnd:  0.84,  // tagline fades out → dark before loop restart
+      symEnd:        0.18,  // floating → grid
+      logoEnd:       0.36,  // logo squares light up white
+      textEnd:       0.56,  // tagline arrives at center
+      textFadeStart: 0.68,  // tagline begins fading out
+      textFadeEnd:   0.84,  // tagline fully gone → dark before loop restart
     };
 
     let lastTS = 0;
@@ -141,19 +139,16 @@
       const dt = Math.min((ts - lastTS) / 16.67, 3);
       lastTS = ts;
 
-      // Clock + loop — restart cleanly once the full cycle completes
       if (!startTime) startTime = ts;
       if (ts - startTime >= DURATION) { initParticles(); startTime = ts; }
       prog = (ts - startTime) / DURATION;
 
-      // Smooth fade-in at the start of every cycle (~0.4 s)
       const fadeIn = ease(clamp(prog / 0.05, 0, 1));
-      const pFade  = sub(prog, PH.expelEnd, PH.fadeEnd); // tagline fade-out
+      const pFade  = sub(prog, PH.textFadeStart, PH.textFadeEnd);
 
-      const pSym   = sub(prog, 0,          PH.symEnd);
-      const pLogo  = sub(prog, PH.symEnd,  PH.logoEnd);
-      const pText  = sub(prog, PH.logoEnd, PH.textEnd);
-      const pExpel = sub(prog, PH.logoEnd, PH.expelEnd); // starts the moment text appears at the right edge
+      const pSym  = sub(prog, 0,          PH.symEnd);
+      const pLogo = sub(prog, PH.symEnd,  PH.logoEnd);
+      const pText = sub(prog, PH.logoEnd, PH.textEnd);
 
       // Floating motion slows to zero as sym phase takes over
       const speedMult = clamp(1 - pSym * 1.5, 0, 1);
@@ -168,7 +163,34 @@
         });
       }
 
-      // ── Compute per-particle draw state ──────────────────────────────────
+      // Text position — computed once; used for both trigger logic and rendering
+      const textX = lerp(W * 1.5, CX, ease(pText));
+
+      // ── Chain reaction trigger ──────────────────────────────────────────────
+      if (pText > 0) {
+        // Primary: text leading edge touches rightmost particles first
+        particles.forEach(p => {
+          if (p.triggerTime < 0 && p.gx >= textX - TEXT_AHEAD) {
+            p.triggerTime = prog;
+          }
+        });
+        // Chain: triggered particles propagate to untriggered grid neighbors.
+        // CHAIN_DELAY throttles the hop rate so the wave visibly spreads.
+        for (let i = 0; i < particles.length; i++) {
+          const p = particles[i];
+          if (p.triggerTime < 0 || prog - p.triggerTime < CHAIN_DELAY) continue;
+          for (let j = 0; j < particles.length; j++) {
+            const q = particles[j];
+            if (q.triggerTime >= 0) continue;
+            const dx = p.gx - q.gx, dy = p.gy - q.gy;
+            if (dx * dx + dy * dy < CHAIN_DIST_SQ) {
+              q.triggerTime = prog;
+            }
+          }
+        }
+      }
+
+      // ── Compute per-particle draw state ──────────────────────────────────────
       const pts = particles.map(p => {
         let x = p.fx, y = p.fy;
         let partAlpha = ALPHA;
@@ -180,41 +202,37 @@
           y = lerp(p.fy, p.gy, t);
         }
 
-        // Logo + Text phases: hold at grid
-        if (pExpel === 0 && (pLogo > 0 || pText > 0)) {
+        // Untriggered during logo/text phases: hold at grid position
+        if (p.triggerTime < 0 && (pLogo > 0 || pText > 0)) {
           x = p.gx;
           y = p.gy;
         }
 
-        // Expel: wave from text row outward, particles fly away + fade
-        if (pExpel > 0) {
-          // Staggered so text-row particles go first (expelDelay=0),
-          // top/bottom rows go last (expelDelay=1)
-          const startPct = p.expelDelay * 0.30; // tighter wave — last particle starts at 30%
-          const endPct   = startPct + 0.35;   // each particle disperses in 35% of expel window
-          const pe = ease(sub(pExpel, startPct, endPct));
-          x          = lerp(p.gx, p.expelTx, pe);
-          y          = lerp(p.gy, p.expelTy, pe);
-          partAlpha  = ALPHA * (1 - pe);
+        // Triggered: fly away and fade out
+        if (p.triggerTime >= 0) {
+          const pe  = ease(clamp((prog - p.triggerTime) / p.expelDur, 0, 1));
+          x         = lerp(p.gx, p.expelTx, pe);
+          y         = lerp(p.gy, p.expelTy, pe);
+          partAlpha = ALPHA * (1 - pe);
         }
 
         // White highlight: fades in through logo phase, fades out through text phase
-        const logoIn  = p.isLogo ? ease(pLogo) : 0;
-        const logoOut = pText > 0 ? 1 - ease(pText) : 1;
+        const logoIn   = p.isLogo ? ease(pLogo) : 0;
+        const logoOut  = pText > 0 ? 1 - ease(pText) : 1;
         const whiteAmt = logoIn * logoOut;
 
         return { x, y, partAlpha, whiteAmt };
       });
 
-      // ── CLEAR + BACKGROUND ────────────────────────────────────────────────
+      // ── CLEAR + BACKGROUND ────────────────────────────────────────────────────
       ctx.clearRect(0, 0, W, H);
       ctx.fillStyle = C_BG;
       ctx.fillRect(0, 0, W, H);
 
-      // ── 1. Constellation lines ────────────────────────────────────────────
-      // Fade out as logo phase begins; skip entirely once expel starts
+      // ── 1. Constellation lines ────────────────────────────────────────────────
+      // connAlpha naturally hits 0 once logo phase completes — no extra guard needed
       const connAlpha = ALPHA * fadeIn * clamp(1 - ease(pLogo), 0, 1);
-      if (connAlpha > 0.01 && pExpel === 0) {
+      if (connAlpha > 0.01) {
         ctx.strokeStyle = C_OUTLINE;
         ctx.lineWidth   = 0.6;
         ctx.lineCap     = 'butt';
@@ -236,16 +254,14 @@
         ctx.globalAlpha = 1;
       }
 
-      // ── 2. Squares ────────────────────────────────────────────────────────
+      // ── 2. Squares ────────────────────────────────────────────────────────────
       pts.forEach(pt => {
         if (pt.partAlpha * fadeIn < 0.01) return;
 
         const w  = pt.whiteAmt;
-        // Outline: #B21EE3 → #ffffff
         const or = Math.round(lerp(178, 255, w));
         const og = Math.round(lerp(30,  255, w));
         const ob = Math.round(lerp(227, 255, w));
-        // Fill: #280833 → #ffffff (becomes solid white pixel for logo)
         const fr = Math.round(lerp(40,  255, w));
         const fg = Math.round(lerp(8,   255, w));
         const fb = Math.round(lerp(51,  255, w));
@@ -264,12 +280,10 @@
         ctx.globalAlpha = 1;
       });
 
-      // ── 3. Tagline ────────────────────────────────────────────────────────
-      // Appears once text phase begins; slides from off-screen right to center
-      if (pText > 0 || pExpel > 0) {
+      // ── 3. Tagline ────────────────────────────────────────────────────────────
+      if (pText > 0) {
         ctx.save();
 
-        // Fit text to 43% screen width (same sizing as other animations)
         ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
         const fs = Math.round(100 * (W * 0.43) / ctx.measureText(TEXT).width);
         ctx.font = `300 ${fs}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
@@ -278,12 +292,7 @@
         ctx.textAlign    = 'center';
         ctx.textBaseline = 'middle';
 
-        // Slide in: starts well off screen right, lands at CX
-        const textX = lerp(W * 1.5, CX, ease(pText));
-
-        // Fade in as it enters, hold, then fade out before loop restart
         const textAlpha = clamp(pText * 4, 0, 1) * (1 - ease(pFade));
-
         ctx.globalAlpha = textAlpha;
         ctx.fillText(TEXT, textX, CY);
         ctx.restore();
