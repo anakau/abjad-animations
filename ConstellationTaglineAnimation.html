@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Constellation Tagline</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #280833; overflow-x: hidden; }
+    #scroll-container { height: 500vh; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="scroll-container"></div>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+    let W, H, CX, CY;
+
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+    }
+    setSize();
+
+    const TEXT         = 'Bringing Clarity to Complexity';
+    const SQ           = 7;
+    const CONN_DIST    = 120;
+    const CONN_DIST_SQ = CONN_DIST * CONN_DIST;
+    const ALPHA        = 0.70;
+    const C_OUTLINE    = '#B21EE3';
+    const C_BG         = '#280833';
+    const C_TEXT       = '#B21EE3'; // light purple end state
+
+    // ── Utilities ──────────────────────────────────────────────────────────────
+    const ease  = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+    const lerp  = (a, b, t) => a + (b - a) * t;
+    const clamp = (t, a = 0, b = 1) => Math.max(a, Math.min(b, t));
+    const sub   = (t, a, b) => clamp((t - a) / (b - a));
+
+    // ── Logo shapes (SVG viewBox 1176 × 991) ───────────────────────────────────
+    const LOGO_SVG_W = 1176, LOGO_SVG_H = 991;
+    const LOGO_SHAPES = [
+      { o:{x:218.711,y:495.729}, v1:{x:319.509,y:0      }, v2:{x:-218.711,y:495.271} },
+      { o:{x:537.792,y:495.727}, v1:{x:319.237,y:0      }, v2:{x: 218.525,y:495.272} },
+      { o:{x:638.092,y:0      }, v1:{x:319.509,y:0      }, v2:{x: 218.711,y:495.272} },
+    ];
+
+    let logoScale, logoOX, logoOY;
+    function computeLogoTransform() {
+      logoScale = Math.min(W * 0.90 / LOGO_SVG_W, H * 0.90 / LOGO_SVG_H);
+      logoOX    = (W - LOGO_SVG_W * logoScale) / 2;
+      logoOY    = (H - LOGO_SVG_H * logoScale) / 2;
+    }
+    computeLogoTransform();
+
+    function inLogo(cx, cy) {
+      const sx = (cx - logoOX) / logoScale;
+      const sy = (cy - logoOY) / logoScale;
+      for (const sh of LOGO_SHAPES) {
+        const rx  = sx - sh.o.x, ry = sy - sh.o.y;
+        const det = sh.v1.x * sh.v2.y - sh.v1.y * sh.v2.x;
+        if (!det) continue;
+        const s = (rx * sh.v2.y - ry * sh.v2.x) / det;
+        const t = (sh.v1.x * ry - sh.v1.y * rx) / det;
+        if (s >= 0 && s <= 1 && t >= 0 && t <= 1) return true;
+      }
+      return false;
+    }
+
+    // ── Particles ──────────────────────────────────────────────────────────────
+    let particles = [];
+    function initParticles() {
+      particles = [];
+      computeLogoTransform();
+
+      const spacing = Math.sqrt(W * H / 350);
+      const cols    = Math.round(W / spacing) + 2;
+      const rows    = Math.round(H / spacing) + 2;
+      const startX  = (W - (cols - 1) * spacing) / 2;
+      const startY  = (H - (rows - 1) * spacing) / 2;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const gx = startX + c * spacing;
+          const gy = startY + r * spacing;
+
+          // Expulsion direction: away from text (CX, CY) with slight jitter
+          const dx  = gx - CX;
+          const dy  = gy - CY;
+          const len = Math.hypot(dx, dy) || 1;
+          const nx  = dx / len + (Math.random() - 0.5) * 0.25;
+          const ny  = dy / len + (Math.random() - 0.5) * 0.25;
+
+          // Enough travel to fully exit any screen
+          const travelDist = Math.max(W, H) * 1.7;
+
+          // Delay: 0 = text row (expelled first), 1 = top/bottom edges (last)
+          // Creates a horizontal wave radiating from the tagline outward
+          const expelDelay = clamp(Math.abs(gy - CY) / (H * 0.5), 0, 1);
+
+          particles.push({
+            fx: Math.random() * W,           // floating x (random start)
+            fy: Math.random() * H,           // floating y
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            gx, gy,
+            expelDelay,
+            expelTx: gx + nx * travelDist,  // landing pos when expelled
+            expelTy: gy + ny * travelDist,
+            isLogo: inLogo(gx, gy),
+          });
+        }
+      }
+    }
+    initParticles();
+
+    // ── Scroll ─────────────────────────────────────────────────────────────────
+    let scrollProg = 0;
+    window.addEventListener('scroll', () => {
+      const max  = document.body.scrollHeight - window.innerHeight;
+      scrollProg = Math.min(1, window.scrollY / (max * 0.85));
+    });
+
+    // Phase milestones
+    const PH = {
+      symEnd:   0.20,  // floating → grid
+      logoEnd:  0.40,  // logo squares light up white
+      textEnd:  0.65,  // tagline slides from right to center
+      expelEnd: 0.92,  // particles expelled and faded
+    };
+
+    let lastTS = 0;
+
+    // ── Render ─────────────────────────────────────────────────────────────────
+    function render(ts) {
+      const dt = Math.min((ts - lastTS) / 16.67, 3);
+      lastTS = ts;
+
+      const prog   = ease(scrollProg);
+      const pSym   = sub(prog, 0,          PH.symEnd);
+      const pLogo  = sub(prog, PH.symEnd,  PH.logoEnd);
+      const pText  = sub(prog, PH.logoEnd, PH.textEnd);
+      const pExpel = sub(prog, PH.textEnd, PH.expelEnd);
+
+      // Floating motion slows to zero as sym phase takes over
+      const speedMult = clamp(1 - pSym * 1.5, 0, 1);
+      if (speedMult > 0) {
+        particles.forEach(p => {
+          p.fx += p.vx * speedMult * dt;
+          p.fy += p.vy * speedMult * dt;
+          if (p.fx < -SQ)    p.fx += W + SQ * 2;
+          if (p.fx > W + SQ) p.fx -= W + SQ * 2;
+          if (p.fy < -SQ)    p.fy += H + SQ * 2;
+          if (p.fy > H + SQ) p.fy -= H + SQ * 2;
+        });
+      }
+
+      // ── Compute per-particle draw state ──────────────────────────────────
+      const pts = particles.map(p => {
+        let x = p.fx, y = p.fy;
+        let partAlpha = ALPHA;
+
+        // Sym: lerp float → grid
+        if (pSym > 0) {
+          const t = ease(pSym);
+          x = lerp(p.fx, p.gx, t);
+          y = lerp(p.fy, p.gy, t);
+        }
+
+        // Logo + Text phases: hold at grid
+        if (pExpel === 0 && (pLogo > 0 || pText > 0)) {
+          x = p.gx;
+          y = p.gy;
+        }
+
+        // Expel: wave from text row outward, particles fly away + fade
+        if (pExpel > 0) {
+          // Staggered so text-row particles go first (expelDelay=0),
+          // top/bottom rows go last (expelDelay=1)
+          const startPct = p.expelDelay * 0.55;
+          const endPct   = startPct + 0.45;
+          const pe = ease(sub(pExpel, startPct, endPct));
+          x          = lerp(p.gx, p.expelTx, pe);
+          y          = lerp(p.gy, p.expelTy, pe);
+          partAlpha  = ALPHA * (1 - pe);
+        }
+
+        // White highlight: fades in through logo phase, fades out through text phase
+        const logoIn  = p.isLogo ? ease(pLogo) : 0;
+        const logoOut = pText > 0 ? 1 - ease(pText) : 1;
+        const whiteAmt = logoIn * logoOut;
+
+        return { x, y, partAlpha, whiteAmt };
+      });
+
+      // ── CLEAR + BACKGROUND ────────────────────────────────────────────────
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = C_BG;
+      ctx.fillRect(0, 0, W, H);
+
+      // ── 1. Constellation lines ────────────────────────────────────────────
+      // Fade out as logo phase begins; skip entirely once expel starts
+      const connAlpha = ALPHA * clamp(1 - ease(pLogo), 0, 1);
+      if (connAlpha > 0.01 && pExpel === 0) {
+        ctx.strokeStyle = C_OUTLINE;
+        ctx.lineWidth   = 0.6;
+        ctx.lineCap     = 'butt';
+        for (let i = 0; i < pts.length; i++) {
+          for (let j = i + 1; j < pts.length; j++) {
+            const dx  = pts[i].x - pts[j].x;
+            const dy  = pts[i].y - pts[j].y;
+            const dSq = dx * dx + dy * dy;
+            if (dSq >= CONN_DIST_SQ) continue;
+            const a = connAlpha * (1 - Math.sqrt(dSq) / CONN_DIST) * 0.5;
+            if (a < 0.01) continue;
+            ctx.globalAlpha = a;
+            ctx.beginPath();
+            ctx.moveTo(pts[i].x, pts[i].y);
+            ctx.lineTo(pts[j].x, pts[j].y);
+            ctx.stroke();
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+
+      // ── 2. Squares ────────────────────────────────────────────────────────
+      pts.forEach(pt => {
+        if (pt.partAlpha < 0.01) return;
+
+        const w  = pt.whiteAmt;
+        // Outline: #B21EE3 → #ffffff
+        const or = Math.round(lerp(178, 255, w));
+        const og = Math.round(lerp(30,  255, w));
+        const ob = Math.round(lerp(227, 255, w));
+        // Fill: #280833 → #ffffff (becomes solid white pixel for logo)
+        const fr = Math.round(lerp(40,  255, w));
+        const fg = Math.round(lerp(8,   255, w));
+        const fb = Math.round(lerp(51,  255, w));
+
+        ctx.globalAlpha = pt.partAlpha;
+        ctx.save();
+        ctx.translate(pt.x, pt.y);
+        ctx.fillStyle   = `rgb(${fr},${fg},${fb})`;
+        ctx.strokeStyle = `rgb(${or},${og},${ob})`;
+        ctx.lineWidth   = 1;
+        ctx.beginPath();
+        ctx.rect(-SQ / 2, -SQ / 2, SQ, SQ);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      });
+
+      // ── 3. Tagline ────────────────────────────────────────────────────────
+      // Appears once text phase begins; slides from off-screen right to center
+      if (pText > 0 || pExpel > 0) {
+        ctx.save();
+
+        // Fit text to 43% screen width (same sizing as other animations)
+        ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+        const fs = Math.round(100 * (W * 0.43) / ctx.measureText(TEXT).width);
+        ctx.font = `300 ${fs}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+
+        ctx.fillStyle    = C_TEXT;
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Slide in: starts well off screen right, lands at CX
+        const textX = lerp(W * 1.5, CX, ease(pText));
+
+        // Fade in quickly as it enters, then stays fully opaque
+        const textAlpha = clamp(pText * 4, 0, 1);
+
+        ctx.globalAlpha = textAlpha;
+        ctx.fillText(TEXT, textX, CY);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+    window.addEventListener('resize', () => { setSize(); initParticles(); });
+  </script>
+</body>
+</html>
