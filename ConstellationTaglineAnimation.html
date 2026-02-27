@@ -99,9 +99,11 @@
           // Enough travel to fully exit any screen
           const travelDist = Math.max(W, H) * 1.7;
 
-          // Delay: 0 = text row (expelled first), 1 = top/bottom edges (last)
-          // Creates a horizontal wave radiating from the tagline outward
-          const expelDelay = clamp(Math.abs(gy - CY) / (H * 0.5), 0, 1);
+          // Delay: right-side particles go first (text enters from right),
+          // left-side particles go last. Row distance adds the vertical wave.
+          const horzDelay  = clamp(1 - gx / W, 0, 1);                    // right=0, left=1
+          const rowDelay   = clamp(Math.abs(gy - CY) / (H * 0.5), 0, 1); // center=0, edges=1
+          const expelDelay = clamp(horzDelay * 0.6 + rowDelay * 0.4, 0, 1);
 
           particles.push({
             fx: Math.random() * W,           // floating x (random start)
@@ -145,7 +147,7 @@
       const pSym   = sub(prog, 0,          PH.symEnd);
       const pLogo  = sub(prog, PH.symEnd,  PH.logoEnd);
       const pText  = sub(prog, PH.logoEnd, PH.textEnd);
-      const pExpel = sub(prog, PH.textEnd, PH.expelEnd);
+      const pExpel = sub(prog, 0.50, PH.expelEnd); // starts mid-text-entry so particles react to approaching text
 
       // Floating motion slows to zero as sym phase takes over
       const speedMult = clamp(1 - pSym * 1.5, 0, 1);
