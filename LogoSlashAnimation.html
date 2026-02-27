@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logo Slash</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #280833; overflow-x: hidden; }
+    #scroll-container { height: 500vh; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="scroll-container"></div>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+    let W, H, CX, CY;
+
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+    }
+    setSize();
+
+    const TEXT     = 'Bringing Clarity to Complexity';
+    const LOGO_CLR = '#B21EE3';
+    const SYM_ANGLE = 0;
+
+    // ── Utilities ────────────────────────────────────────────────────────────
+    const ease  = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+    const lerp  = (a, b, t) => a + (b - a) * t;
+    const clamp = (t, a = 0, b = 1) => Math.max(a, Math.min(b, t));
+    const sub   = (t, a, b) => clamp((t - a) / (b - a));
+
+    function angleLerp(a, b, t) {
+      let diff = b - a;
+      while (diff >  Math.PI) diff -= 2 * Math.PI;
+      while (diff < -Math.PI) diff += 2 * Math.PI;
+      return a + diff * t;
+    }
+
+    // ── Logo data (SVG viewBox 1176 × 991) ───────────────────────────────────
+    // Each shape: P(s,t) = origin + s*v1 + t*v2  for s,t ∈ [0,1]
+    // Sequence: slash 3 (top-right) first, slash 1 (bottom-left) last.
+    const LOGO_SVG_W = 1176, LOGO_SVG_H = 991;
+    const LOGO_SHAPES = [
+      { // Slash 1  "/"  bottom-left — LAST
+        o:  { x: 218.711, y: 495.729 },
+        v1: { x: 319.509, y: 0       },
+        v2: { x:-218.711, y: 495.271 },
+        edgeAngle:  65 * Math.PI / 180,
+        delayBase: 0.24,
+      },
+      { // Slash 2  "\"  bottom-right — SECOND
+        o:  { x: 537.792, y: 495.727 },
+        v1: { x: 319.237, y: 0       },
+        v2: { x: 218.525, y: 495.272 },
+        edgeAngle: -65 * Math.PI / 180,
+        delayBase: 0.60,
+      },
+      { // Slash 3  "\"  top-right — FIRST
+        o:  { x: 638.092, y: 0       },
+        v1: { x: 319.509, y: 0       },
+        v2: { x: 218.711, y: 495.272 },
+        edgeAngle: -65 * Math.PI / 180,
+        delayBase: 0.92,
+      },
+    ];
+
+    // ── Logo canvas transform ─────────────────────────────────────────────────
+    let logoScale, logoOX, logoOY;
+    function computeLogoTransform() {
+      logoScale = Math.min(W * 0.68 / LOGO_SVG_W, H * 0.68 / LOGO_SVG_H);
+      logoOX    = (W - LOGO_SVG_W * logoScale) / 2;
+      logoOY    = (H - LOGO_SVG_H * logoScale) / 2;
+    }
+    computeLogoTransform();
+
+    // Draw all three filled parallelograms at current logoScale/OX/OY
+    function drawLogoFilled(alpha) {
+      if (alpha <= 0) return;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle   = LOGO_CLR;
+      LOGO_SHAPES.forEach(sh => {
+        const x = v => logoOX + v * logoScale;
+        const y = v => logoOY + v * logoScale;
+        const Ax = x(sh.o.x),                          Ay = y(sh.o.y);
+        const Bx = x(sh.o.x + sh.v1.x),                By = y(sh.o.y + sh.v1.y);
+        const Cx = x(sh.o.x + sh.v1.x + sh.v2.x),     Cy = y(sh.o.y + sh.v1.y + sh.v2.y);
+        const Dx = x(sh.o.x + sh.v2.x),                Dy = y(sh.o.y + sh.v2.y);
+        ctx.beginPath();
+        ctx.moveTo(Ax, Ay); ctx.lineTo(Bx, By);
+        ctx.lineTo(Cx, Cy); ctx.lineTo(Dx, Dy);
+        ctx.closePath();
+        ctx.fill();
+      });
+      ctx.globalAlpha = 1;
+    }
+
+    // Draw text at a fixed canvas position (not affected by zoom transform)
+    function drawText(alpha, yPos) {
+      if (alpha <= 0) return;
+      ctx.save();
+      ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+      const fs = Math.round(100 * (W * 0.43) / ctx.measureText(TEXT).width);
+      ctx.font         = `300 ${fs}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+      ctx.globalAlpha  = alpha;
+      ctx.fillStyle    = '#ffffff';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(TEXT, CX, yPos);
+      ctx.restore();
+    }
+
+    // ── Particles ─────────────────────────────────────────────────────────────
+    let particles = [];
+    function initParticles() {
+      particles = [];
+      computeLogoTransform();
+
+      const spacing = Math.sqrt(W * H / 420);
+      const cols    = Math.round(W / spacing) + 2;
+      const rows    = Math.round(H / spacing) + 2;
+      const startX  = (W - (cols - 1) * spacing) / 2;
+      const startY  = (H - (rows - 1) * spacing) / 2;
+
+      const grid = [];
+      for (let r = 0; r < rows; r++)
+        for (let c = 0; c < cols; c++)
+          grid.push({ gx: startX + c * spacing, gy: startY + r * spacing });
+
+      const N = grid.length;
+      grid.forEach((g, i) => {
+        const si = Math.min(2, Math.floor(i * 3 / N));
+        const sh = LOGO_SHAPES[si];
+
+        // Sample point on PERIMETER of parallelogram
+        const A = sh.o;
+        const B = { x: A.x + sh.v1.x,             y: A.y + sh.v1.y };
+        const C = { x: A.x + sh.v1.x + sh.v2.x,   y: A.y + sh.v1.y + sh.v2.y };
+        const D = { x: A.x + sh.v2.x,              y: A.y + sh.v2.y };
+
+        const eAB = Math.hypot(B.x-A.x, B.y-A.y); // top (horiz)
+        const eBC = Math.hypot(C.x-B.x, C.y-B.y); // right slant
+        const eCD = Math.hypot(D.x-C.x, D.y-C.y); // bottom (horiz)
+        const eDA = Math.hypot(A.x-D.x, A.y-D.y); // left slant
+        const eTotal = eAB + eBC + eCD + eDA;
+
+        // Pick edge weighted by length; assign angle to match edge direction
+        const r1 = Math.random() * eTotal;
+        let from, to, edgeAng;
+        if      (r1 < eAB)               { from = A; to = B; edgeAng = 0; }
+        else if (r1 < eAB + eBC)         { from = B; to = C; edgeAng = sh.edgeAngle; }
+        else if (r1 < eAB + eBC + eCD)   { from = C; to = D; edgeAng = 0; }
+        else                             { from = D; to = A; edgeAng = sh.edgeAngle; }
+
+        const tt  = Math.random();
+        const svgX = from.x + tt * (to.x - from.x);
+        const svgY = from.y + tt * (to.y - from.y);
+        const tx   = logoOX + svgX * logoScale;
+        const ty   = logoOY + svgY * logoScale;
+
+        // Delay: delayBase ± small jitter. Higher = aligns sooner.
+        const delay = clamp(sh.delayBase + (Math.random() - 0.5) * 0.10, 0.02, 0.98);
+
+        particles.push({
+          gx:          g.gx,
+          gy:          g.gy,
+          angle:       Math.round(Math.random() * 3) * Math.PI / 2,
+          targetAngle: Math.round(Math.random() * 3) * Math.PI / 2,
+          timer:       Math.random() * 60 + 30,
+          len:         spacing * 0.65,
+          lw:          Math.random() * 1.5 + 0.8,
+          tx, ty,
+          delay,
+          alignAngle:  edgeAng,
+          symAngle:    0,
+          sa:          0,
+        });
+      });
+    }
+    initParticles();
+
+    // ── Scroll ───────────────────────────────────────────────────────────────
+    let scrollProg = 0;
+    window.addEventListener('scroll', () => {
+      const max  = document.body.scrollHeight - window.innerHeight;
+      scrollProg = Math.min(1, window.scrollY / (max * 0.85));
+    });
+
+    // Phase milestones (eased scroll progress)
+    const PH = {
+      symEnd:     0.18, // grid → all horizontal
+      outlineEnd: 0.50, // particles trace logo perimeter — 3 shapes, sequential
+      fillEnd:    0.60, // logo interior fades in (cross-fade with particles)
+      zoomEnd:    0.82, // logo zooms with trail; text fades in near end
+      tvEnd:      1.00, // old-TV turn-off
+    };
+    const TEXT_APPEAR = 0.72; // within overall prog when text starts
+
+    let snapped    = false;
+    let symSnapped = false;
+    let lastTS     = 0;
+
+    // ── Render ───────────────────────────────────────────────────────────────
+    function render(ts) {
+      const dt = Math.min((ts - lastTS) / 16.67, 3);
+      lastTS = ts;
+
+      const prog     = ease(scrollProg);
+      const pSym     = sub(prog, 0,             PH.symEnd);
+      const pOutline = sub(prog, PH.symEnd,     PH.outlineEnd);
+      const pFill    = sub(prog, PH.outlineEnd, PH.fillEnd);
+      const pZoom    = sub(prog, PH.fillEnd,    PH.zoomEnd);
+      const pTV      = sub(prog, PH.zoomEnd,    PH.tvEnd);
+      const pText    = sub(prog, TEXT_APPEAR,   PH.zoomEnd);
+
+      // ── State machine ──────────────────────────────────────────────────────
+
+      if (pSym > 0 && !symSnapped) {
+        symSnapped = true;
+        particles.forEach(p => { p.symAngle = p.angle; });
+      }
+      if (pSym === 0) symSnapped = false;
+
+      if (pOutline > 0 && !snapped) {
+        snapped = true;
+        particles.forEach(p => { p.sa = angleLerp(p.symAngle, SYM_ANGLE, ease(pSym)); });
+      }
+      if (pOutline === 0) snapped = false;
+
+      if (pSym === 0) {
+        particles.forEach(p => {
+          p.timer -= dt;
+          if (p.timer <= 0) {
+            p.targetAngle += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
+            p.timer = Math.random() * 60 + 30;
+          }
+          let diff = p.targetAngle - p.angle;
+          while (diff >  Math.PI) diff -= 2 * Math.PI;
+          while (diff < -Math.PI) diff += 2 * Math.PI;
+          p.angle += diff * 0.08 * dt;
+        });
+      }
+
+      // Compute particle draw positions
+      const pts = particles.map(p => {
+        let x = p.gx, y = p.gy, angle = p.angle;
+
+        if (pSym > 0 && pOutline === 0) {
+          angle = angleLerp(p.symAngle, SYM_ANGLE, ease(pSym));
+        }
+
+        if (pOutline > 0) {
+          const startPct = (1 - p.delay) * 0.38;
+          const pa = sub(pOutline, startPct, startPct + 0.62);
+          const t  = ease(pa);
+          x     = lerp(p.gx, p.tx, t);
+          y     = lerp(p.gy, p.ty, t);
+          angle = angleLerp(p.sa, p.alignAngle, ease(pa));
+        }
+
+        return { x, y, angle, len: p.len, lw: p.lw };
+      });
+
+      // Particle visibility: fade out as fill comes in
+      const partAlpha = 1 - ease(pFill);
+
+      // ── DRAW ───────────────────────────────────────────────────────────────
+
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#280833';
+      ctx.fillRect(0, 0, W, H);
+
+      // ── Phase A: organic / sym / outline / fill ───────────────────────────
+      if (pZoom === 0 && pTV === 0) {
+
+        // Outline particles
+        if (partAlpha > 0.01) {
+          ctx.globalAlpha = partAlpha;
+          ctx.strokeStyle = LOGO_CLR;
+          ctx.lineCap     = 'round';
+          pts.forEach(pt => {
+            const cosA = Math.cos(pt.angle);
+            const sinA = Math.sin(pt.angle);
+            ctx.lineWidth = pt.lw;
+            ctx.beginPath();
+            ctx.moveTo(pt.x, pt.y);
+            ctx.lineTo(pt.x + cosA * pt.len, pt.y - sinA * pt.len);
+            ctx.stroke();
+          });
+          ctx.globalAlpha = 1;
+        }
+
+        // Solid fill (cross-fades in)
+        drawLogoFilled(ease(pFill));
+      }
+
+      // ── Phase B: zoom with trail ──────────────────────────────────────────
+      else if (pTV === 0) {
+        const zScale = lerp(1, 2.8, ease(pZoom));
+
+        // Ghost trail copies (earlier scales, lower alpha)
+        for (let gi = 5; gi >= 1; gi--) {
+          const ghostProg  = Math.max(0, ease(pZoom) - gi * 0.07);
+          const ghostScale = lerp(1, 2.8, ghostProg);
+          const ghostAlpha = (1 - gi * 0.18) * 0.4 * ease(pZoom);
+          if (ghostAlpha < 0.01) continue;
+          ctx.save();
+          ctx.translate(CX, CY);
+          ctx.scale(ghostScale, ghostScale);
+          ctx.translate(-CX, -CY);
+          drawLogoFilled(ghostAlpha);
+          ctx.restore();
+        }
+
+        // Main logo at current zoom
+        ctx.save();
+        ctx.translate(CX, CY);
+        ctx.scale(zScale, zScale);
+        ctx.translate(-CX, -CY);
+        drawLogoFilled(1);
+        ctx.restore();
+
+        // Tagline — fades in near end of zoom, fixed position
+        if (pText > 0) {
+          drawText(Math.min(1, pText * 3), CY);
+        }
+      }
+
+      // ── Phase C: TV turn-off ──────────────────────────────────────────────
+      else {
+        const tv1 = sub(pTV, 0.00, 0.45); // vertical collapse
+        const tv2 = sub(pTV, 0.45, 0.85); // horizontal shrink
+        const tv3 = sub(pTV, 0.85, 1.00); // final flash + vanish
+
+        const bandH = lerp(H, 2, ease(tv1));
+        const bandW = lerp(W, 0, ease(tv2));
+
+        if (tv3 < 1) {
+          // Draw logo + text clipped to the collapsing band
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(CX - bandW / 2, CY - bandH / 2, bandW, bandH);
+          ctx.clip();
+
+          // Logo at peak zoom
+          ctx.translate(CX, CY);
+          ctx.scale(2.8, 2.8);
+          ctx.translate(-CX, -CY);
+          drawLogoFilled(1);
+          ctx.restore();
+
+          // Text clipped to same band (separate save/restore, no scale)
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(CX - bandW / 2, CY - bandH / 2, bandW, bandH);
+          ctx.clip();
+          drawText(1, CY);
+          ctx.restore();
+
+          // Bright phosphor glow on the band as it collapses
+          const glowA = Math.min(1, ease(tv1) * 1.4) * (1 - ease(tv3));
+          if (glowA > 0) {
+            ctx.globalAlpha = glowA * 0.85;
+            ctx.fillStyle   = '#ffffff';
+            ctx.fillRect(CX - bandW / 2, CY - bandH / 2, bandW, bandH);
+            ctx.globalAlpha = 1;
+          }
+        } else {
+          // Tiny bright spot fades to nothing
+          const spotA = 1 - ease(tv3);
+          if (spotA > 0) {
+            ctx.globalAlpha = spotA;
+            ctx.fillStyle   = '#ffffff';
+            ctx.fillRect(CX - 25, CY - 2, 50, 3);
+            ctx.globalAlpha = 1;
+          }
+        }
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+    window.addEventListener('resize', () => { setSize(); initParticles(); });
+  </script>
+</body>
+</html>
