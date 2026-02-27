@@ -146,7 +146,7 @@
       const pSym   = sub(prog, 0,          PH.symEnd);
       const pLogo  = sub(prog, PH.symEnd,  PH.logoEnd);
       const pText  = sub(prog, PH.logoEnd, PH.textEnd);
-      const pExpel = sub(prog, 0.47, PH.expelEnd); // starts mid-text-entry so particles react to approaching text
+      const pExpel = sub(prog, PH.logoEnd, PH.expelEnd); // starts the moment text appears at the right edge
 
       // Floating motion slows to zero as sym phase takes over
       const speedMult = clamp(1 - pSym * 1.5, 0, 1);
