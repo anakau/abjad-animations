@@ -124,13 +124,14 @@
     let startTime  = null;
     let prog       = 0;
 
-    // Phase milestones — direct fractions of DURATION (no outer ease)
-    // 8 s total: sym 0→1.44s | logo 1.44→2.88s | text 2.88→4.64s | expel 4.64→7.04s
+    // Phase milestones — direct fractions of DURATION
+    // 8 s: sym 0→1.44s | logo 1.44→2.88s | text+expel 2.88→5.44s | fade 5.44→6.72s | dark 6.72→8s
     const PH = {
       symEnd:   0.18,  // floating → grid
       logoEnd:  0.36,  // logo squares light up white
-      textEnd:  0.58,  // tagline slides from right to center
-      expelEnd: 0.88,  // particles expelled and faded
+      textEnd:  0.56,  // tagline arrives at center
+      expelEnd: 0.68,  // all particles gone (~1s after text first appears)
+      fadeEnd:  0.84,  // tagline fades out → dark before loop restart
     };
 
     let lastTS = 0;
@@ -140,8 +141,14 @@
       const dt = Math.min((ts - lastTS) / 16.67, 3);
       lastTS = ts;
 
+      // Clock + loop — restart cleanly once the full cycle completes
       if (!startTime) startTime = ts;
-      prog = Math.min(1, (ts - startTime) / DURATION);
+      if (ts - startTime >= DURATION) { initParticles(); startTime = ts; }
+      prog = (ts - startTime) / DURATION;
+
+      // Smooth fade-in at the start of every cycle (~0.4 s)
+      const fadeIn = ease(clamp(prog / 0.05, 0, 1));
+      const pFade  = sub(prog, PH.expelEnd, PH.fadeEnd); // tagline fade-out
 
       const pSym   = sub(prog, 0,          PH.symEnd);
       const pLogo  = sub(prog, PH.symEnd,  PH.logoEnd);
@@ -183,8 +190,8 @@
         if (pExpel > 0) {
           // Staggered so text-row particles go first (expelDelay=0),
           // top/bottom rows go last (expelDelay=1)
-          const startPct = p.expelDelay * 0.55;
-          const endPct   = startPct + 0.45;
+          const startPct = p.expelDelay * 0.30; // tighter wave — last particle starts at 30%
+          const endPct   = startPct + 0.35;   // each particle disperses in 35% of expel window
           const pe = ease(sub(pExpel, startPct, endPct));
           x          = lerp(p.gx, p.expelTx, pe);
           y          = lerp(p.gy, p.expelTy, pe);
@@ -206,7 +213,7 @@
 
       // ── 1. Constellation lines ────────────────────────────────────────────
       // Fade out as logo phase begins; skip entirely once expel starts
-      const connAlpha = ALPHA * clamp(1 - ease(pLogo), 0, 1);
+      const connAlpha = ALPHA * fadeIn * clamp(1 - ease(pLogo), 0, 1);
       if (connAlpha > 0.01 && pExpel === 0) {
         ctx.strokeStyle = C_OUTLINE;
         ctx.lineWidth   = 0.6;
@@ -231,7 +238,7 @@
 
       // ── 2. Squares ────────────────────────────────────────────────────────
       pts.forEach(pt => {
-        if (pt.partAlpha < 0.01) return;
+        if (pt.partAlpha * fadeIn < 0.01) return;
 
         const w  = pt.whiteAmt;
         // Outline: #B21EE3 → #ffffff
@@ -243,7 +250,7 @@
         const fg = Math.round(lerp(8,   255, w));
         const fb = Math.round(lerp(51,  255, w));
 
-        ctx.globalAlpha = pt.partAlpha;
+        ctx.globalAlpha = pt.partAlpha * fadeIn;
         ctx.save();
         ctx.translate(pt.x, pt.y);
         ctx.fillStyle   = `rgb(${fr},${fg},${fb})`;
@@ -274,8 +281,8 @@
         // Slide in: starts well off screen right, lands at CX
         const textX = lerp(W * 1.5, CX, ease(pText));
 
-        // Fade in quickly as it enters, then stays fully opaque
-        const textAlpha = clamp(pText * 4, 0, 1);
+        // Fade in as it enters, hold, then fade out before loop restart
+        const textAlpha = clamp(pText * 4, 0, 1) * (1 - ease(pFade));
 
         ctx.globalAlpha = textAlpha;
         ctx.fillText(TEXT, textX, CY);
