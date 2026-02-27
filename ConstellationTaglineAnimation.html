@@ -6,13 +6,11 @@
   <title>Constellation Tagline</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #280833; overflow-x: hidden; }
-    #scroll-container { height: 500vh; }
+    body { background: #280833; }
     canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
   </style>
 </head>
 <body>
-  <div id="scroll-container"></div>
   <canvas id="c"></canvas>
 
   <script>
@@ -121,19 +119,18 @@
     }
     initParticles();
 
-    // ── Scroll ─────────────────────────────────────────────────────────────────
-    let scrollProg = 0;
-    window.addEventListener('scroll', () => {
-      const max  = document.body.scrollHeight - window.innerHeight;
-      scrollProg = Math.min(1, window.scrollY / (max * 0.85));
-    });
+    // ── Autoplay clock ─────────────────────────────────────────────────────────
+    const DURATION = 8000; // total animation length in ms
+    let startTime  = null;
+    let prog       = 0;
 
-    // Phase milestones
+    // Phase milestones — direct fractions of DURATION (no outer ease)
+    // 8 s total: sym 0→1.44s | logo 1.44→2.88s | text 2.88→4.64s | expel 4.64→7.04s
     const PH = {
-      symEnd:   0.20,  // floating → grid
-      logoEnd:  0.40,  // logo squares light up white
-      textEnd:  0.65,  // tagline slides from right to center
-      expelEnd: 0.92,  // particles expelled and faded
+      symEnd:   0.18,  // floating → grid
+      logoEnd:  0.36,  // logo squares light up white
+      textEnd:  0.58,  // tagline slides from right to center
+      expelEnd: 0.88,  // particles expelled and faded
     };
 
     let lastTS = 0;
@@ -143,11 +140,13 @@
       const dt = Math.min((ts - lastTS) / 16.67, 3);
       lastTS = ts;
 
-      const prog   = ease(scrollProg);
+      if (!startTime) startTime = ts;
+      prog = Math.min(1, (ts - startTime) / DURATION);
+
       const pSym   = sub(prog, 0,          PH.symEnd);
       const pLogo  = sub(prog, PH.symEnd,  PH.logoEnd);
       const pText  = sub(prog, PH.logoEnd, PH.textEnd);
-      const pExpel = sub(prog, 0.50, PH.expelEnd); // starts mid-text-entry so particles react to approaching text
+      const pExpel = sub(prog, 0.47, PH.expelEnd); // starts mid-text-entry so particles react to approaching text
 
       // Floating motion slows to zero as sym phase takes over
       const speedMult = clamp(1 - pSym * 1.5, 0, 1);
