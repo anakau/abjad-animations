@@ -22,6 +22,24 @@
       border: none;
     }
 
+    /* ── Mode label ── */
+    #mode-label {
+      position: fixed;
+      top: 18px;
+      right: 64px;
+      z-index: 20;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.45);
+      white-space: nowrap;
+      pointer-events: none;
+    }
+
     /* ── Hamburger button ── */
     #menu-btn {
       position: fixed;
@@ -117,6 +135,8 @@
 
   <iframe id="frame" src=""></iframe>
 
+  <div id="mode-label"></div>
+
   <button id="menu-btn" aria-label="Toggle menu">
     <span></span>
     <span></span>
@@ -127,25 +147,23 @@
 
   <script>
     const animations = [
-      { label: "Particle Orbits",        href: "ParticleAnimation.html" },
-      { label: "Clarity",                href: "ClarityAnimation.html" },
-      { label: "Logo Assembly",          href: "LogoRevealAnimation.html" },
-      { label: "Implode",                href: "ImplodeAnimation.html" },
-      { label: "Slash",                  href: "SlashAnimation.html" },
-      { label: "Grid Slash",             href: "GridSlashAnimation.html" },
-      { label: "Grid Slash Loop",        href: "GridSlashLoopAnimation.html" },
-      { label: "Logo Slash",             href: "LogoSlashAnimation.html" },
-      { label: "Constellation Slash",    href: "ConstellationSlashAnimation.html" },
-      { label: "Constellation Tagline",  href: "ConstellationTaglineAnimation.html" },
-      { label: "Constellation Lines",    href: "ConstellationLinesAnimation.html" },
-      { label: "Logo Form Slash",        href: "LogoFormSlashAnimation.html" },
-      { label: "Grid Slash Center",      href: "GridSlashCenterAnimation.html" },
+      { label: "Implode",                href: "ImplodeAnimation.html",           type: "scroll"   },
+      { label: "Slash",                  href: "SlashAnimation.html",             type: "scroll"   },
+      { label: "Grid Slash",             href: "GridSlashAnimation.html",         type: "scroll"   },
+      { label: "Grid Slash Loop",        href: "GridSlashLoopAnimation.html",     type: "autoplay" },
+      { label: "Logo Slash",             href: "LogoSlashAnimation.html",         type: "scroll"   },
+      { label: "Constellation Slash",    href: "ConstellationSlashAnimation.html",type: "scroll"   },
+      { label: "Constellation Tagline",  href: "ConstellationTaglineAnimation.html", type: "autoplay" },
+      { label: "Constellation Lines",    href: "ConstellationLinesAnimation.html",type: "scroll"   },
+      { label: "Logo Form Slash",        href: "LogoFormSlashAnimation.html",     type: "autoplay" },
+      { label: "Grid Slash Center",      href: "GridSlashCenterAnimation.html",   type: "autoplay" },
       // Add new entries here ↓
     ];
 
-    const frame   = document.getElementById('frame');
-    const nav     = document.getElementById('nav');
-    const menuBtn = document.getElementById('menu-btn');
+    const frame     = document.getElementById('frame');
+    const nav       = document.getElementById('nav');
+    const menuBtn   = document.getElementById('menu-btn');
+    const modeLabel = document.getElementById('mode-label');
 
     // Toggle menu open/closed
     menuBtn.addEventListener('click', () => {
@@ -160,6 +178,9 @@
       nav.querySelectorAll('a').forEach((a, j) => a.classList.toggle('active', j === i));
       nav.classList.remove('open');
       menuBtn.classList.remove('open');
+      modeLabel.textContent = animations[i].type === 'scroll'
+        ? 'Scroll to experience'
+        : 'Autoplay';
     }
 
     function hashIndex() {
