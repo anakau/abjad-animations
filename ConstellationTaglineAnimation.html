@@ -33,10 +33,10 @@
     const CHAIN_DIST_SQ = CHAIN_DIST * CHAIN_DIST;
     const CHAIN_DELAY   = 0.005; // prog units between chain hops (~40 ms at 8 s cycle)
     const TEXT_AHEAD    = 80;    // px ahead of text leading edge to trigger particles
-    const ALPHA        = 0.70;
-    const C_OUTLINE    = '#B21EE3';
+    const ALPHA        = 1.0;
+    const C_OUTLINE    = '#CC33FF';
     const C_BG         = '#280833';
-    const C_TEXT       = '#B21EE3';
+    const C_TEXT       = '#CC33FF';
 
     // ── Utilities ──────────────────────────────────────────────────────────────
     const ease  = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
@@ -242,7 +242,7 @@
             const dy  = pts[i].y - pts[j].y;
             const dSq = dx * dx + dy * dy;
             if (dSq >= CONN_DIST_SQ) continue;
-            const a = connAlpha * (1 - Math.sqrt(dSq) / CONN_DIST) * 0.5;
+            const a = connAlpha * (1 - Math.sqrt(dSq) / CONN_DIST) * 0.6;
             if (a < 0.01) continue;
             ctx.globalAlpha = a;
             ctx.beginPath();
@@ -259,12 +259,13 @@
         if (pt.partAlpha * fadeIn < 0.01) return;
 
         const w  = pt.whiteAmt;
-        const or = Math.round(lerp(178, 255, w));
-        const og = Math.round(lerp(30,  255, w));
-        const ob = Math.round(lerp(227, 255, w));
-        const fr = Math.round(lerp(40,  255, w));
-        const fg = Math.round(lerp(8,   255, w));
-        const fb = Math.round(lerp(51,  255, w));
+        const or = Math.round(lerp(204, 255, w));
+        const og = Math.round(lerp(51,  255, w));
+        const ob = Math.round(lerp(255, 255, w));
+        // Fill: #400060 → #ffffff (visible purple fill, becomes solid white for logo)
+        const fr = Math.round(lerp(64,  255, w));
+        const fg = Math.round(lerp(0,   255, w));
+        const fb = Math.round(lerp(96,  255, w));
 
         ctx.globalAlpha = pt.partAlpha * fadeIn;
         ctx.save();

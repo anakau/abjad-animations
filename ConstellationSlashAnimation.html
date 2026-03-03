@@ -34,10 +34,10 @@
     const SQ           = 7;           // square side in px
     const CONN_DIST    = 120;         // max constellation link distance
     const CONN_DIST_SQ = CONN_DIST * CONN_DIST;
-    const ALPHA        = 0.70;        // base particle opacity
+    const ALPHA        = 1.0;         // base particle opacity
 
-    // Colours — same palette as GridSlashAnimation
-    const C_OUTLINE = '#B21EE3';
+    // Colours
+    const C_OUTLINE = '#CC33FF';
     const C_BG      = '#280833';
 
     // ── Utilities ─────────────────────────────────────────────────────────────
@@ -248,7 +248,7 @@
             const dSq = dx * dx + dy * dy;
             if (dSq >= CONN_DIST_SQ) continue;
             const dist = Math.sqrt(dSq);
-            const a    = connAlpha * (1 - dist / CONN_DIST) * 0.5;
+            const a    = connAlpha * (1 - dist / CONN_DIST) * 0.6;
             if (a < 0.01) continue;
             ctx.globalAlpha = a;
             ctx.beginPath();
@@ -260,10 +260,10 @@
         ctx.globalAlpha = 1;
       }
 
-      // ── Slash stroke colour: #B21EE3 → #ffffff at glow peak, then back ─────
-      const sr       = Math.round(lerp(178, 255, glow));
-      const sg       = Math.round(lerp(30,  255, glow));
-      const sb       = Math.round(lerp(227, 255, glow));
+      // ── Slash stroke colour: #CC33FF → #ffffff at glow peak, then back ─────
+      const sr       = Math.round(lerp(204, 255, glow));
+      const sg       = Math.round(lerp(51,  255, glow));
+      const sb       = Math.round(lerp(255, 255, glow));
       const slashClr = `rgb(${sr},${sg},${sb})`;
 
       // ── 2. Glow pass (drawn underneath crisp strokes) ─────────────────────
@@ -295,14 +295,14 @@
 
         // — Square: fades out as morph increases —
         if (m < 0.98) {
-          // Outline colour: #B21EE3 → #ffffff
-          const or = Math.round(lerp(178, 255, w));
-          const og = Math.round(lerp(30,  255, w));
-          const ob = Math.round(lerp(227, 255, w));
-          // Fill colour: #280833 → #ffffff (becomes solid white block)
-          const fr = Math.round(lerp(40,  255, w));
-          const fg = Math.round(lerp(8,   255, w));
-          const fb = Math.round(lerp(51,  255, w));
+          // Outline colour: #CC33FF → #ffffff
+          const or = Math.round(lerp(204, 255, w));
+          const og = Math.round(lerp(51,  255, w));
+          const ob = Math.round(lerp(255, 255, w));
+          // Fill colour: #400060 → #ffffff (visible purple fill)
+          const fr = Math.round(lerp(64,  255, w));
+          const fg = Math.round(lerp(0,   255, w));
+          const fb = Math.round(lerp(96,  255, w));
 
           ctx.globalAlpha = ALPHA * (1 - m);
           ctx.save();
