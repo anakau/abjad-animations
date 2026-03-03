@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logo Form Slash</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #280833; }
+    canvas { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <script>
+    const canvas = document.getElementById('c');
+    const ctx    = canvas.getContext('2d');
+    let W, H, CX, CY;
+
+    function setSize() {
+      W = canvas.width  = window.innerWidth;
+      H = canvas.height = window.innerHeight;
+      CX = W / 2; CY = H / 2;
+    }
+    setSize();
+
+    const TEXT         = 'Bringing Clarity to Complexity';
+    const TARGET_ANGLE = 65 * Math.PI / 180;
+    const COS65        = Math.cos(TARGET_ANGLE);
+    const SIN65        = Math.sin(TARGET_ANGLE);
+    const SYM_ANGLE    = 0; // all hands go horizontal before logo form
+
+    function angleLerp(a, b, t) {
+      let d = b - a;
+      while (d >  Math.PI) d -= 2 * Math.PI;
+      while (d < -Math.PI) d += 2 * Math.PI;
+      return a + d * t;
+    }
+
+    // ── Logo shapes (SVG viewBox 1176 × 991) ───────────────────────────────────
+    const LOGO_SVG_W = 1176, LOGO_SVG_H = 991;
+    const LOGO_SHAPES = [
+      { o:{x:218.711,y:495.729}, v1:{x:319.509,y:0      }, v2:{x:-218.711,y:495.271} },
+      { o:{x:537.792,y:495.727}, v1:{x:319.237,y:0      }, v2:{x: 218.525,y:495.272} },
+      { o:{x:638.092,y:0      }, v1:{x:319.509,y:0      }, v2:{x: 218.711,y:495.272} },
+    ];
+
+    let logoScale, logoOX, logoOY;
+    function computeLogoTransform() {
+      logoScale = Math.min(W * 0.90 / LOGO_SVG_W, H * 0.90 / LOGO_SVG_H);
+      logoOX    = (W - LOGO_SVG_W * logoScale) / 2;
+      logoOY    = (H - LOGO_SVG_H * logoScale) / 2;
+    }
+    computeLogoTransform();
+
+    // Distance from point (px, py) to segment (ax,ay)→(bx,by) in 2-D
+    function distToSeg(px, py, ax, ay, bx, by) {
+      const dx = bx - ax, dy = by - ay;
+      const len2 = dx * dx + dy * dy;
+      if (len2 === 0) return Math.hypot(px - ax, py - ay);
+      const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len2));
+      return Math.hypot(px - ax - t * dx, py - ay - t * dy);
+    }
+
+    // For a grid point in SVG coords (sx, sy), return the canvas drawing angle
+    // of the nearest logo parallelogram edge, or SYM_ANGLE if none are close.
+    function getLogoEdgeAngle(sx, sy, thresh) {
+      let minDist   = Infinity;
+      let bestAngle = SYM_ANGLE;
+
+      for (const sh of LOGO_SHAPES) {
+        const { o, v1, v2 } = sh;
+        const ax = o.x,          ay = o.y;
+        const bx = o.x + v1.x,   by = o.y + v1.y;
+        const cx = bx  + v2.x,   cy = by  + v2.y;
+        const dx = o.x + v2.x,   dy = o.y + v2.y;
+
+        // 4 edges of the parallelogram with their direction vectors
+        const edges = [
+          { x1:ax, y1:ay, x2:bx, y2:by, dir:v1 },  // bottom (v1)
+          { x1:dx, y1:dy, x2:cx, y2:cy, dir:v1 },  // top    (v1)
+          { x1:ax, y1:ay, x2:dx, y2:dy, dir:v2 },  // left   (v2)
+          { x1:bx, y1:by, x2:cx, y2:cy, dir:v2 },  // right  (v2)
+        ];
+
+        for (const e of edges) {
+          const d = distToSeg(sx, sy, e.x1, e.y1, e.x2, e.y2);
+          if (d < minDist) {
+            minDist = d;
+            // Canvas drawing angle: atan2(-dy, dx) from direction vector,
+            // then normalise to the "rightward" half so lines don't flip.
+            let a = Math.atan2(-e.dir.y, e.dir.x);
+            if (Math.cos(a) < 0) a += (a > 0 ? -Math.PI : Math.PI);
+            bestAngle = a;
+          }
+        }
+      }
+
+      return minDist < thresh ? bestAngle : SYM_ANGLE;
+    }
+
+    // ── Particles ──────────────────────────────────────────────────────────────
+    let particles = [];
+    function initParticles() {
+      particles = [];
+      computeLogoTransform();
+
+      const spacing  = Math.sqrt(W * H / 300);
+      const threshSVG = (spacing / logoScale) * 0.75; // ~0.75 grid-cell coverage per edge side
+
+      const cols   = Math.round(W / spacing) + 2;
+      const rows   = Math.round(H / spacing) + 2;
+      const startX = (W - (cols - 1) * spacing) / 2;
+      const startY = (H - (rows - 1) * spacing) / 2;
+      const half   = Math.hypot(W, H) * 0.64;
+
+      const grid = [];
+      for (let r = 0; r < rows; r++)
+        for (let c = 0; c < cols; c++)
+          grid.push({ gx: startX + c * spacing, gy: startY + r * spacing });
+
+      const proj = g => g.gx * COS65 - g.gy * SIN65;
+      grid.sort((a, b) => proj(b) - proj(a));
+
+      const N = grid.length;
+      grid.forEach((g, i) => {
+        const t  = i / (N - 1);
+        const tx = CX + (1 - 2 * t) * half * COS65;
+        const ty = CY - (1 - 2 * t) * half * SIN65;
+
+        // Grid position in SVG coordinate space
+        const sx = (g.gx - logoOX) / logoScale;
+        const sy = (g.gy - logoOY) / logoScale;
+
+        const initAngle = Math.round(Math.random() * 3) * Math.PI / 2;
+
+        particles.push({
+          gx: g.gx, gy: g.gy,
+          angle:       initAngle,
+          targetAngle: initAngle,
+          timer:       Math.random() * 60 + 30,
+          len:         spacing * 0.65,
+          lw:          Math.random() * 1.5 + 0.8,
+          tx, ty,
+          delay:       1 - t,
+          side:        tx >= CX ? 1 : -1,
+          symAngle:    0,
+          // Pre-computed: angle this slash should show during logo form phase
+          logoAngle:   getLogoEdgeAngle(sx, sy, threshSVG),
+        });
+      });
+    }
+    initParticles();
+
+    // ── Auto-play timing ───────────────────────────────────────────────────────
+    const ORGANIC_S = 3.0;
+    const ANIM_S    = 7.0;  // slightly longer to accommodate logo phase
+    const HOLD_S    = 1.5;
+    const FADE_S    = 0.7;
+    const FADEIN_S  = 0.5;
+    const TOTAL_S   = ORGANIC_S + ANIM_S + HOLD_S + FADE_S;
+
+    let cycleStart = null;
+
+    const ease  = t => t < 0.5 ? 2*t*t : -1 + (4-2*t)*t;
+    const lerp  = (a, b, t) => a + (b - a) * t;
+    const clamp = (t, a = 0, b = 1) => Math.max(a, Math.min(b, t));
+    const sub   = (t, a, b) => clamp((t - a) / (b - a));
+
+    // Phase milestones (fraction of scrollProg 0→1)
+    const PH = {
+      symEnd:   0.20,  // organic → horizontal grid
+      logoEnd:  0.42,  // slashes rotate to trace logo outline
+      alignEnd: 0.65,  // converge to big "/" diagonal
+      holdEnd:  0.72,  // glow hold
+      splitEnd: 0.92,  // panels split, text reveals
+    };
+
+    let symSnapped = false;
+    let lastTS     = 0;
+
+    // ── Render ─────────────────────────────────────────────────────────────────
+    function render(ts) {
+      const dt = Math.min((ts - lastTS) / 16.67, 3);
+      lastTS = ts;
+
+      if (cycleStart === null) cycleStart = ts;
+      const cycleSec = ((ts - cycleStart) / 1000) % TOTAL_S;
+
+      const scrollProg = cycleSec < ORGANIC_S
+        ? 0
+        : Math.min(1, (cycleSec - ORGANIC_S) / ANIM_S);
+
+      // Fade overlay: covers the reset jump between cycles
+      const fadeOutT = sub(cycleSec, ORGANIC_S + ANIM_S + HOLD_S, TOTAL_S);
+      const fadeInT  = cycleSec < FADEIN_S ? 1 - cycleSec / FADEIN_S : 0;
+      const overlay  = Math.max(ease(fadeOutT), fadeInT);
+
+      const prog   = ease(scrollProg);
+      const pSym   = sub(prog, 0,           PH.symEnd);
+      const pLogo  = sub(prog, PH.symEnd,   PH.logoEnd);
+      const pAlign = sub(prog, PH.logoEnd,  PH.alignEnd);
+      const pHold  = sub(prog, PH.alignEnd, PH.holdEnd);
+      const pSplit = sub(prog, PH.holdEnd,  PH.splitEnd);
+
+      const glowBuild = sub(pAlign, 0.78, 1.0);
+      const glowFade  = 1 - ease(pHold);
+      const glow      = prog < PH.alignEnd ? glowBuild : glowFade;
+
+      // Snapshot organic angles at start of sym phase
+      if (pSym > 0 && !symSnapped) {
+        symSnapped = true;
+        particles.forEach(p => { p.symAngle = p.angle; });
+      }
+      if (pSym === 0) symSnapped = false;
+
+      // Organic 90° turns — only while idle (before sym phase)
+      if (pSym === 0) {
+        particles.forEach(p => {
+          p.timer -= dt;
+          if (p.timer <= 0) {
+            p.targetAngle += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
+            p.timer = Math.random() * 60 + 30;
+          }
+          let diff = p.targetAngle - p.angle;
+          while (diff >  Math.PI) diff -= 2 * Math.PI;
+          while (diff < -Math.PI) diff += 2 * Math.PI;
+          p.angle += diff * 0.08 * dt;
+        });
+      }
+
+      // ── Compute per-particle draw state ──────────────────────────────────────
+      const pts = particles.map(p => {
+        let x     = p.gx;
+        let y     = p.gy;
+        let angle = p.angle;
+
+        // 1. Sym: ease all to horizontal
+        if (pSym > 0 && pLogo === 0) {
+          angle = angleLerp(p.symAngle, SYM_ANGLE, ease(pSym));
+        }
+
+        // 2. Logo form: rotate each slash to match its nearest logo outline edge
+        //    Particles far from any edge stay at SYM_ANGLE (logoAngle = 0).
+        if (pLogo > 0 && pAlign === 0) {
+          angle = angleLerp(SYM_ANGLE, p.logoAngle, ease(pLogo));
+        }
+
+        // 3. Align: positions converge to diagonal; angles → TARGET_ANGLE
+        //    Start angle = p.logoAngle (guaranteed by phase ordering — pLogo=1 here).
+        if (pAlign > 0) {
+          const startPct = (1 - p.delay) * 0.38;
+          const pa       = sub(pAlign, startPct, startPct + 0.62);
+          const t        = ease(pa);
+          x     = lerp(p.gx, p.tx, t);
+          y     = lerp(p.gy, p.ty, t);
+          angle = angleLerp(p.logoAngle, TARGET_ANGLE, ease(pa));
+        }
+
+        // 4. Split: two panels slide apart
+        if (pSplit > 0) {
+          x += p.side * ease(pSplit) * W * 0.72;
+        }
+
+        return { x, y, angle, len: p.len, lw: p.lw };
+      });
+
+      // ── CLEAR + BACKGROUND ────────────────────────────────────────────────────
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = '#280833';
+      ctx.fillRect(0, 0, W, H);
+
+      // ── 1. Slashes ────────────────────────────────────────────────────────────
+      const sr       = Math.round(lerp(204, 255, glow));
+      const sg       = Math.round(lerp(51,  255, glow));
+      const sb       = Math.round(lerp(255, 255, glow));
+      const strokeClr = `rgb(${sr},${sg},${sb})`;
+
+      ctx.strokeStyle = strokeClr;
+      ctx.lineCap     = 'round';
+
+      if (glow > 0.01) {
+        ctx.shadowColor = '#cc44ff';
+        ctx.shadowBlur  = glow * 45;
+        pts.forEach(pt => {
+          const cosA = Math.cos(pt.angle);
+          const sinA = Math.sin(pt.angle);
+          ctx.globalAlpha = 1;
+          ctx.lineWidth   = pt.lw * (1 + glow * 1.2);
+          ctx.beginPath();
+          ctx.moveTo(pt.x, pt.y);
+          ctx.lineTo(pt.x + cosA * pt.len, pt.y - sinA * pt.len);
+          ctx.stroke();
+        });
+        ctx.shadowBlur = 0;
+      }
+
+      ctx.globalAlpha = 1;
+      pts.forEach(pt => {
+        const cosA = Math.cos(pt.angle);
+        const sinA = Math.sin(pt.angle);
+        ctx.lineWidth = pt.lw;
+        ctx.beginPath();
+        ctx.moveTo(pt.x, pt.y);
+        ctx.lineTo(pt.x + cosA * pt.len, pt.y - sinA * pt.len);
+        ctx.stroke();
+      });
+
+      // ── 2. Text — revealed through the widening gap ───────────────────────────
+      if (pSplit > 0) {
+        ctx.save();
+        ctx.font = `300 100px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+        const fs = Math.round(100 * (W * 0.43) / ctx.measureText(TEXT).width);
+        ctx.font = `300 ${fs}px 'Helvetica Neue', Helvetica, Arial, sans-serif`;
+
+        const gapHalf = ease(pSplit) * W * 0.72;
+        ctx.beginPath();
+        ctx.rect(CX - gapHalf, 0, gapHalf * 2, H);
+        ctx.clip();
+
+        ctx.globalAlpha  = Math.min(1, (pSplit - 0.08) / 0.42);
+        ctx.fillStyle    = '#ffffff';
+        ctx.textAlign    = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(TEXT, CX, CY);
+        ctx.restore();
+      }
+
+      // ── 3. Fade overlay (covers the reset jump between cycles) ────────────────
+      if (overlay > 0) {
+        ctx.globalAlpha = overlay;
+        ctx.fillStyle   = '#280833';
+        ctx.fillRect(0, 0, W, H);
+        ctx.globalAlpha = 1;
+      }
+
+      requestAnimationFrame(render);
+    }
+
+    requestAnimationFrame(render);
+    window.addEventListener('resize', () => { setSize(); initParticles(); });
+  </script>
+</body>
+</html>
