@@ -90,7 +90,7 @@
       display: flex;
       flex-direction: column;
       align-items: flex-end;
-      gap: 5px;
+      gap: 4px;
       padding: 10px 12px;
       background: rgba(0, 0, 0, 0.28);
       backdrop-filter: blur(8px);
@@ -110,6 +110,29 @@
       transform: translateY(0);
     }
 
+    /* ── Group header ── */
+    .group-header {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 8px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.2);
+      white-space: nowrap;
+      user-select: none;
+      padding-top: 8px;
+      margin-top: 2px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      width: 100%;
+      text-align: right;
+    }
+
+    .group-header:first-child {
+      padding-top: 0;
+      margin-top: 0;
+      border-top: none;
+    }
+
+    /* ── Animation links ── */
     nav a {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
       font-size: 10px;
@@ -147,16 +170,19 @@
 
   <script>
     const animations = [
-      { label: "Implode",                href: "ImplodeAnimation.html",           type: "scroll"   },
-      { label: "Slash",                  href: "SlashAnimation.html",             type: "scroll"   },
-      { label: "Grid Slash",             href: "GridSlashAnimation.html",         type: "scroll"   },
-      { label: "Grid Slash Loop",        href: "GridSlashLoopAnimation.html",     type: "autoplay" },
-      { label: "Logo Slash",             href: "LogoSlashAnimation.html",         type: "scroll"   },
-      { label: "Constellation Slash",    href: "ConstellationSlashAnimation.html",type: "scroll"   },
-      { label: "Constellation Tagline",  href: "ConstellationTaglineAnimation.html", type: "autoplay" },
-      { label: "Constellation Lines",    href: "ConstellationLinesAnimation.html",type: "scroll"   },
-      { label: "Logo Form Slash",        href: "LogoFormSlashAnimation.html",     type: "autoplay" },
-      { label: "Grid Slash Center",      href: "GridSlashCenterAnimation.html",   type: "autoplay" },
+      // ── Floating Slashes ──────────────────────────────────────────────────
+      { label: "Implode",               href: "ImplodeAnimation.html",             type: "scroll",   group: "Floating Slashes" },
+      { label: "Slash",                 href: "SlashAnimation.html",               type: "scroll",   group: "Floating Slashes" },
+      { label: "Constellation Lines",   href: "ConstellationLinesAnimation.html",  type: "scroll",   group: "Floating Slashes" },
+      // ── Slash Grid Variations ─────────────────────────────────────────────
+      { label: "Grid Slash",            href: "GridSlashAnimation.html",           type: "scroll",   group: "Slash Grid Variations" },
+      { label: "Grid Slash Loop",       href: "GridSlashLoopAnimation.html",       type: "autoplay", group: "Slash Grid Variations" },
+      { label: "Logo Slash",            href: "LogoSlashAnimation.html",           type: "scroll",   group: "Slash Grid Variations" },
+      { label: "Logo Form Slash",       href: "LogoFormSlashAnimation.html",       type: "autoplay", group: "Slash Grid Variations" },
+      { label: "Grid Slash Center",     href: "GridSlashCenterAnimation.html",     type: "autoplay", group: "Slash Grid Variations" },
+      // ── Nodes Variations ──────────────────────────────────────────────────
+      { label: "Constellation Slash",   href: "ConstellationSlashAnimation.html",  type: "scroll",   group: "Nodes Variations" },
+      { label: "Constellation Tagline", href: "ConstellationTaglineAnimation.html",type: "autoplay", group: "Nodes Variations" },
       // Add new entries here ↓
     ];
 
@@ -171,7 +197,6 @@
       menuBtn.classList.toggle('open', open);
     });
 
-    // Close menu when clicking an animation link
     function show(i) {
       frame.src = animations[i].href;
       location.hash = i + 1;
@@ -188,7 +213,16 @@
       return (Number.isFinite(n) && n >= 1 && n <= animations.length) ? n - 1 : 0;
     }
 
+    // Build nav with group headers
+    let currentGroup = null;
     animations.forEach((anim, i) => {
+      if (anim.group !== currentGroup) {
+        currentGroup = anim.group;
+        const header = document.createElement('div');
+        header.className = 'group-header';
+        header.textContent = anim.group;
+        nav.appendChild(header);
+      }
       const a = document.createElement('a');
       a.textContent = `Animation ${i + 1}`;
       a.href = `#${i + 1}`;
