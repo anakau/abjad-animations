@@ -75,7 +75,7 @@
           targetAngle: Math.round(Math.random() * 3) * Math.PI / 2,
           timer:       Math.random() * 60 + 30,
           len:         spacing * 0.65,
-          lw:          Math.random() * 1.5 + 0.8,
+          lw:          1.2,
           tx, ty,
           delay:       1 - t,
           side:        tx >= CX ? 1 : -1,
@@ -204,9 +204,9 @@
       ctx.fillRect(0, 0, W, H);
 
       // ── 1. Slashes ────────────────────────────────────────────────────────
-      const sr = Math.round(lerp(178, 255, glow));
-      const sg = Math.round(lerp(30,  255, glow));
-      const sb = Math.round(lerp(227, 255, glow));
+      const sr = Math.round(lerp(204, 255, glow));
+      const sg = Math.round(lerp(51,  255, glow));
+      const sb = Math.round(lerp(255, 255, glow));
       const strokeClr = `rgb(${sr},${sg},${sb})`;
 
       ctx.globalAlpha = 1;
