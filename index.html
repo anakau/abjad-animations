@@ -22,9 +22,51 @@
       border: none;
     }
 
-    nav {
+    /* ── Hamburger button ── */
+    #menu-btn {
       position: fixed;
       top: 18px;
+      right: 20px;
+      z-index: 20;
+      width: 36px;
+      height: 36px;
+      border: none;
+      background: rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 0;
+    }
+
+    #menu-btn span {
+      display: block;
+      width: 16px;
+      height: 1.5px;
+      background: rgba(255, 255, 255, 0.55);
+      border-radius: 2px;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+      transform-origin: center;
+    }
+
+    /* Animate hamburger → × when open */
+    #menu-btn.open span:nth-child(1) { transform: translateY(6.5px) rotate(45deg); }
+    #menu-btn.open span:nth-child(2) { opacity: 0; transform: scaleX(0); }
+    #menu-btn.open span:nth-child(3) { transform: translateY(-6.5px) rotate(-45deg); }
+
+    #menu-btn:hover span {
+      background: rgba(255, 255, 255, 0.85);
+    }
+
+    /* ── Nav panel ── */
+    nav {
+      position: fixed;
+      top: 62px;
       right: 20px;
       z-index: 10;
       display: flex;
@@ -36,6 +78,18 @@
       backdrop-filter: blur(8px);
       -webkit-backdrop-filter: blur(8px);
       border-radius: 8px;
+
+      /* Hidden by default */
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(-6px);
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    nav.open {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translateY(0);
     }
 
     nav a {
@@ -62,6 +116,13 @@
 <body>
 
   <iframe id="frame" src=""></iframe>
+
+  <button id="menu-btn" aria-label="Toggle menu">
+    <span></span>
+    <span></span>
+    <span></span>
+  </button>
+
   <nav id="nav"></nav>
 
   <script>
@@ -76,22 +137,32 @@
       { label: "Logo Slash",             href: "LogoSlashAnimation.html" },
       { label: "Constellation Slash",    href: "ConstellationSlashAnimation.html" },
       { label: "Constellation Tagline",  href: "ConstellationTaglineAnimation.html" },
-      { label: "Constellation Lines",   href: "ConstellationLinesAnimation.html" },
+      { label: "Constellation Lines",    href: "ConstellationLinesAnimation.html" },
       // Add new entries here ↓
     ];
 
-    const frame = document.getElementById('frame');
-    const nav   = document.getElementById('nav');
+    const frame   = document.getElementById('frame');
+    const nav     = document.getElementById('nav');
+    const menuBtn = document.getElementById('menu-btn');
 
-    function hashIndex() {
-      const n = parseInt(location.hash.slice(1));
-      return (Number.isFinite(n) && n >= 1 && n <= animations.length) ? n - 1 : 0;
-    }
+    // Toggle menu open/closed
+    menuBtn.addEventListener('click', () => {
+      const open = nav.classList.toggle('open');
+      menuBtn.classList.toggle('open', open);
+    });
 
+    // Close menu when clicking an animation link
     function show(i) {
       frame.src = animations[i].href;
       location.hash = i + 1;
       nav.querySelectorAll('a').forEach((a, j) => a.classList.toggle('active', j === i));
+      nav.classList.remove('open');
+      menuBtn.classList.remove('open');
+    }
+
+    function hashIndex() {
+      const n = parseInt(location.hash.slice(1));
+      return (Number.isFinite(n) && n >= 1 && n <= animations.length) ? n - 1 : 0;
     }
 
     animations.forEach((anim, i) => {

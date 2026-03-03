@@ -28,9 +28,11 @@
     setSize();
 
     const TEXT         = 'Bringing Clarity to Complexity';
-    const TARGET_ANGLE = 65 * Math.PI / 180;
-    const COS65        = Math.cos(TARGET_ANGLE);
-    const SIN65        = Math.sin(TARGET_ANGLE);
+    const TARGET_ANGLE = 65 * Math.PI / 180; // the "/" angle
+    const COS_A        = Math.cos(TARGET_ANGLE);
+    const SIN_A        = Math.sin(TARGET_ANGLE);
+    const COS65        = COS_A; // for sort projection
+    const SIN65        = SIN_A;
     const CONN_DIST    = 120;
     const CONN_DIST_SQ = CONN_DIST * CONN_DIST;
     const ALPHA        = 1.0;
@@ -42,13 +44,6 @@
     const lerp  = (a, b, t) => a + (b - a) * t;
     const clamp = (t, a = 0, b = 1) => Math.max(a, Math.min(b, t));
     const sub   = (t, a, b) => clamp((t - a) / (b - a));
-
-    function angleLerp(a, b, t) {
-      let d = b - a;
-      while (d >  Math.PI) d -= 2 * Math.PI;
-      while (d < -Math.PI) d += 2 * Math.PI;
-      return a + d * t;
-    }
 
     // ── Logo shapes (SVG viewBox 1176 × 991) ───────────────────────────────────
     const LOGO_SVG_W = 1176, LOGO_SVG_H = 991;
@@ -98,7 +93,7 @@
         for (let c = 0; c < cols; c++)
           grid.push({ gx: startX + c * spacing, gy: startY + r * spacing });
 
-      // Sort by "/" projection for R→L sweep during align
+      // Sort by "/" projection for R→L stagger during align
       const proj = g => g.gx * COS65 - g.gy * SIN65;
       grid.sort((a, b) => proj(b) - proj(a));
 
@@ -108,31 +103,21 @@
         const tx = CX + (1 - 2 * t) * half * COS65;
         const ty = CY - (1 - 2 * t) * half * SIN65;
 
-        const initAngle = Math.round(Math.random() * 3) * Math.PI / 2;
-
         particles.push({
-          // Floating state
           fx: Math.random() * W,
           fy: Math.random() * H,
           vx: (Math.random() - 0.5) * 0.5,
           vy: (Math.random() - 0.5) * 0.5,
 
-          // Grid / slash targets
           gx: g.gx, gy: g.gy,
           tx, ty,
           delay: 1 - t,
           side:  tx >= CX ? 1 : -1,
 
-          // Slash geometry
-          lenN: spacing * 0.38,            // short node length (constellation phase)
-          len:  spacing * 0.65,            // full length (slash phase)
+          // All slashes at TARGET_ANGLE throughout — short during float, full during align
+          lenN: spacing * 0.38,
+          len:  spacing * 0.65,
           lw:   Math.random() * 1.2 + 0.6,
-
-          // Organic spin state — random 90° multiples
-          angle:       initAngle,
-          targetAngle: initAngle,
-          timer:       Math.random() * 60 + 30,
-          sa:          initAngle,          // snapped at align start
 
           isLogo: inLogo(g.gx, g.gy),
         });
@@ -155,8 +140,7 @@
       splitEnd: 0.93,
     };
 
-    let snapped = false;
-    let lastTS  = 0;
+    let lastTS = 0;
 
     // ── Render ─────────────────────────────────────────────────────────────────
     function render(ts) {
@@ -187,36 +171,13 @@
         });
       }
 
-      // Organic 90° turns — only while floating (before sym phase freezes them)
-      if (pSym === 0) {
-        particles.forEach(p => {
-          p.timer -= dt;
-          if (p.timer <= 0) {
-            p.targetAngle += (Math.random() < 0.5 ? 1 : -1) * Math.PI / 2;
-            p.timer = Math.random() * 60 + 30;
-          }
-          let diff = p.targetAngle - p.angle;
-          while (diff >  Math.PI) diff -= 2 * Math.PI;
-          while (diff < -Math.PI) diff += 2 * Math.PI;
-          p.angle += diff * 0.08 * dt;
-        });
-      }
-
-      // Snap organic angle at the moment align phase begins
-      if (pAlign > 0 && !snapped) {
-        snapped = true;
-        particles.forEach(p => { p.sa = p.angle; });
-      }
-      if (pAlign === 0) snapped = false;
-
       // ── Compute per-particle draw state ──────────────────────────────────────
       const pts = particles.map(p => {
         let x          = p.fx;
         let y          = p.fy;
-        let angle      = p.angle;   // frozen once pSym > 0
-        let currentLen = p.lenN;    // grows to p.len during align
+        let currentLen = p.lenN;
 
-        // Sym: ease floating → grid position
+        // Sym: ease floating positions → grid
         if (pSym > 0) {
           const t = ease(pSym);
           x = lerp(p.fx, p.gx, t);
@@ -229,14 +190,13 @@
           y = p.gy;
         }
 
-        // Align: staggered convergence — position, angle, length all morph
+        // Align: staggered position convergence to diagonal; slash length grows
         if (pAlign > 0) {
           const startPct = (1 - p.delay) * 0.38;
           const pa       = sub(pAlign, startPct, startPct + 0.62);
           const t        = ease(pa);
           x          = lerp(p.gx, p.tx, t);
           y          = lerp(p.gy, p.ty, t);
-          angle      = angleLerp(p.sa, TARGET_ANGLE, ease(pa));
           currentLen = lerp(p.lenN, p.len, ease(pa));
         }
 
@@ -245,12 +205,12 @@
           x += p.side * ease(pSplit) * W * 0.72;
         }
 
-        // Logo highlight: logo slashes turn white during logo phase, fade back during align
+        // Logo highlight: white during logo phase, fades back as align begins
         const logoFadeIn  = p.isLogo ? ease(pLogo) : 0;
         const logoFadeOut = pAlign > 0 ? 1 - ease(pAlign) : 1;
         const whiteAmt    = logoFadeIn * logoFadeOut;
 
-        return { x, y, angle, currentLen, whiteAmt, lw: p.lw };
+        return { x, y, currentLen, whiteAmt, lw: p.lw };
       });
 
       // ── CLEAR + BACKGROUND ────────────────────────────────────────────────────
@@ -290,20 +250,18 @@
       const sb       = Math.round(lerp(255, 255, glow));
       const slashClr = `rgb(${sr},${sg},${sb})`;
 
-      // ── 2. Glow pass (underneath crisp strokes) ───────────────────────────────
+      // ── 2. Glow pass ─────────────────────────────────────────────────────────
       if (glow > 0.01) {
         ctx.shadowColor = '#cc44ff';
         ctx.shadowBlur  = glow * 45;
         ctx.lineCap     = 'round';
         pts.forEach(pt => {
-          const cosA = Math.cos(pt.angle);
-          const sinA = Math.sin(pt.angle);
           ctx.globalAlpha = ALPHA;
           ctx.strokeStyle = slashClr;
           ctx.lineWidth   = pt.lw * (1 + glow * 1.2);
           ctx.beginPath();
           ctx.moveTo(pt.x, pt.y);
-          ctx.lineTo(pt.x + cosA * pt.currentLen, pt.y - sinA * pt.currentLen);
+          ctx.lineTo(pt.x + COS_A * pt.currentLen, pt.y - SIN_A * pt.currentLen);
           ctx.stroke();
         });
         ctx.shadowBlur  = 0;
@@ -313,12 +271,9 @@
       // ── 3. Slash nodes ────────────────────────────────────────────────────────
       ctx.lineCap = 'round';
       pts.forEach(pt => {
-        const cosA = Math.cos(pt.angle);
-        const sinA = Math.sin(pt.angle);
-        const w    = pt.whiteAmt;
+        const w = pt.whiteAmt;
 
-        // Colour: C_OUTLINE base, lerp to white for logo highlight;
-        //         during align/split use slashClr so glow flash works
+        // Colour: C_OUTLINE → white for logo highlight; slashClr during align/split (glow)
         let strokeClr;
         if (pAlign > 0) {
           strokeClr = slashClr;
@@ -334,7 +289,7 @@
         ctx.lineWidth   = pt.lw;
         ctx.beginPath();
         ctx.moveTo(pt.x, pt.y);
-        ctx.lineTo(pt.x + cosA * pt.currentLen, pt.y - sinA * pt.currentLen);
+        ctx.lineTo(pt.x + COS_A * pt.currentLen, pt.y - SIN_A * pt.currentLen);
         ctx.stroke();
         ctx.globalAlpha = 1;
       });
